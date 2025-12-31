@@ -1,0 +1,3 @@
+[workspace]
+members = ["server", "shared", "web/parser"]
+resolver = "3"
