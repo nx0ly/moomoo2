@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.100"
-config = "0.15.19"
+config = { version = "0.15.19", features = ["toml"] }
 glam = "0.30.9"
 rapier2d = { version = "0.31.0", features = ["simd-stable"] }
 rcgen = "0.14.6"
@@ -21,3 +21,8 @@ borsh-derive = "1.6.0"
 shared = { path = "../shared", features = ["server"] }
 tracing-subscriber = "0.3.22"
 bytes = "1.11.0"
+nanorand = "0.8.0"
+serde = { version = "1.0.228", features = ["derive"] }
+rayon = "1.11.0"
+parking_lot = "0.12.5"
+futures = "0.3.31"

@@ -6,10 +6,6 @@ use serde::{Deserialize, Serialize};
 
 use borsh_derive::{BorshDeserialize, BorshSerialize};
 
-fn main() {
-    println!("Hello, world!");
-}
-
 #[derive(Debug, Clone, BorshDeserialize, BorshSerialize)]
 #[cfg_attr(feature = "server", derive(Component))]
 #[cfg_attr(feature = "web", derive(Serialize, Deserialize))]
@@ -18,25 +14,13 @@ pub struct Player {
     pub id: u8,
     pub x: f32,
     pub y: f32,
-    pub move_dir: Option<f32>,
-    pub vx: f32,
-    pub vy: f32,
-    pub attacked: bool,
-    pub weapon_index: Option<u8>,
 }
 
 #[derive(Debug, Clone, BorshDeserialize, BorshSerialize)]
 #[cfg_attr(feature = "web", derive(Serialize, Deserialize))]
 pub struct Move {
-    pub dir: f32,
+    dir: f32,
 }
-
-#[derive(Debug, Clone, BorshDeserialize, BorshSerialize)]
-#[cfg_attr(feature = "web", derive(Serialize, Deserialize))]
-pub struct SpawnMessage {
-    pub name: String,
-}
-
 
 #[cfg(feature = "web")]
 #[wasm_bindgen]
@@ -46,8 +30,6 @@ pub struct JsPlayer {
     id: u8,
     x: f32,
     y: f32,
-    move_dir: Option<f32>,
-    weapon_index: Option<u8>
 }
 
 #[cfg(feature = "web")]
@@ -58,8 +40,6 @@ impl From<Player> for JsPlayer {
             id: value.id,
             x: value.x,
             y: value.y,
-            move_dir: value.move_dir,
-            weapon_index: value.weapon_index
         }
     }
 }
@@ -71,12 +51,7 @@ impl From<JsPlayer> for Player {
             name: value.name,
             id: value.id,
             x: value.x,
-            y: value.y,
-            move_dir: value.move_dir,
-            vx: 0.,
-            vy: 0.,
-            attacked: false,
-            weapon_index: value.weapon_index,
+            y: value.y
         }
     }
 }
