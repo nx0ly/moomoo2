@@ -1,5 +1,5 @@
 use bevy_ecs::system::Query;
-use shared::Player;
+use shared::structs::server::Player;
 
 type AttackQuery<'a> = Query<'a, 'a, (&'a mut Player)>;
 pub fn attack_system(mut query: AttackQuery) {

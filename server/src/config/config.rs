@@ -4,11 +4,14 @@ use serde::Deserialize;
 #[derive(Debug, Deserialize)]
 pub struct Config {
     pub map: MapConfig,
+
 }
 
 #[derive(Debug, Deserialize)]
 pub struct MapConfig {
-    pub size: u16,
+    pub initial: u16,
+    pub increment_per_player: u16,
+    pub dead_zone_dpt: u8
 }
 
 pub fn load_config() -> Result<Config, config::ConfigError> {

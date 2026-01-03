@@ -1,4 +1,4 @@
-use shared::{Move, Player};
+use shared::structs::server::{Move, Player};
 use thiserror::Error;
 
 /// internal game messages used to pass information around

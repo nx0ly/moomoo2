@@ -1,5 +1,5 @@
 use bevy_ecs::prelude::*;
-use shared::Player;
+use shared::structs::server::Player;
 
 const PLAYER_ACCEL: f32 = 1.13;
 const PLAYER_DECEL: f32 = 0.998;

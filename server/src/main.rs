@@ -7,7 +7,9 @@ use bevy_ecs::prelude::*;
 use dashmap::DashMap;
 use nanorand::{Rng, WyRand};
 use parking_lot::Mutex;
-use shared::{Move, PacketType, Player, SpawnMessage};
+use shared::structs::server::{Move, Player};
+use shared::{PacketType};
+use shared::to_server::SpawnMessage;
 use tokio::sync::mpsc as god;
 use wtransport::*;
 
@@ -61,7 +63,6 @@ async fn main() -> anyhow::Result<()> {
     let server = Endpoint::server(config)?;
     tracing::info!("server started");
 
-    let conn_world = world.clone();
     let player_count: AtomicU8 = AtomicU8::new(0);
 
     tokio::spawn(async move {

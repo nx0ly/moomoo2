@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "minify": "node src/build.js",
+    "minify": "node build.js",
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview"
   },

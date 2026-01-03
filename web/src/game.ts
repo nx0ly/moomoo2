@@ -28,13 +28,13 @@ export class Game {
 
         let container = new Container();
         this.app.stage.addChild(container);
+        
+        let awd = {
+            name: "why god javedpension?",
+                    }
+                    
+                    this.sender.write(encode_into_bytes(awd, 1));
 
-        let aja = {
-            name: "why god javedpension?"
-        };
-        let bytes = encode_into_bytes(aja, 1);
-        console.log(bytes)
-        this.sender.write(bytes);
     }
 
     async read(reader: ReadableStreamDefaultReader<Uint8Array>) {
