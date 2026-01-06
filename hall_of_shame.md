@@ -5,6 +5,8 @@
 - deltasigma (retarded)
 - dr. abdo (retarded)
 - no/mattz/q (watersheep reincarnated, ragebaiter)
+- razoshi (skids with cursor)
+- slaughterhouse (retarded)
 
 ill add more as i encounter
 
