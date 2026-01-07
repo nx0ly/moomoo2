@@ -1650,11 +1650,18 @@ version = "0.1.0"
 dependencies = [
  "borsh",
  "borsh-derive",
+ "chacha20poly1305",
+ "getrandom 0.2.16",
+ "hkdf",
+ "pqc_kyber",
+ "rand_core 0.6.4",
  "serde",
  "serde-wasm-bindgen",
  "serde_derive",
+ "sha2",
  "shared",
  "wasm-bindgen",
+ "x25519-dalek",
 ]
 
 [[package]]

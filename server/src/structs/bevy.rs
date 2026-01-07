@@ -42,7 +42,7 @@ impl World {
         if let Some(conn_ref) = connections.get(&id) {
             let mut conn = conn_ref.lock();
             if let Err(e) = conn.send_encrypted(plaintext).await {
-                tracing::warn!("Failed to send packet to player {}: {}", id, e);
+                tracing::warn!("failed to send packet to player {}: {}", id, e);
             }
         }
     }

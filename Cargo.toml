@@ -1,3 +1,8 @@
 [workspace]
 members = ["server", "shared", "web/parser"]
 resolver = "3"
+
+package.authors = ["JavedPension"]
+package.license-file = "LICENSE"
+package.description = "a modernized moomoo.io clone"
+package.keywords = ["moomoo", "cowgame", "moomoo.io", "moomoo2", "moomoo2.io", "new moomoo", "hack", "mod", "game", "clone", "josh", "frvr"]
