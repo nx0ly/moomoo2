@@ -15,9 +15,12 @@ use x25519_dalek::{EphemeralSecret, PublicKey};
 use bevy_ecs::prelude::*;
 use dashmap::DashMap;
 use parking_lot::Mutex;
-use shared::structs::server::{Move, Player};
 use shared::to_server::SpawnMessage;
 use shared::PacketType;
+use shared::{
+    structs::server::{Move, Player},
+    Packet,
+};
 use tokio::sync::mpsc as god;
 use wtransport::*;
 
@@ -51,6 +54,7 @@ struct ServerHello {
     kyber_ct: Vec<u8>, // kyber768 ciphertext (1088 bytes)
 }
 
+#[derive(Clone)]
 struct SessionCrypto {
     cipher: ChaCha20Poly1305,
     recv_nonce: u64,
@@ -99,7 +103,6 @@ async fn perform_handshake(
     let server_public = PublicKey::from(&server_secret);
 
     let mut buf = vec![0u8; 4096]; // Kyber768 PK is 1184 bytes + X25519 is 32 bytes + borsh overhead (thanks friend)
-
     let len = recv
         .read(&mut buf)
         .await?
@@ -170,6 +173,7 @@ async fn main() -> anyhow::Result<()> {
     let net_streams = id_to_stream.clone();
     let net_players = id_to_player.clone();
     let net_input_tx = input_tx.clone();
+    let aj = Arc::new(Mutex::new(DashMap::new()));
 
     let identity = Identity::load_pemfiles("cert.pem", "key.pem")
         .await
@@ -184,8 +188,9 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("port 6767");
 
     let player_count = AtomicU8::new(0);
-
-    // Spawn networking task
+    let mut connected_ips = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::with_capacity(40)));
+    let aja = aj.clone();
+    // spawn networking task
     tokio::spawn(async move {
         loop {
             let session_req = match server.accept().await.await {
@@ -201,11 +206,13 @@ async fn main() -> anyhow::Result<()> {
             let conn_streams = net_streams.clone();
             let conn_players = net_players.clone();
             let tx = net_input_tx.clone();
+            let mut connected_ips = connected_ips.clone();
+            let aja = aja.clone();
 
             tokio::spawn(async move {
                 let _session = PlayerSession {
                     id: player_id,
-                    streams: conn_streams.clone(),
+                    connections: aja.clone(),
                     players: conn_players.clone(),
                     tx: tx.clone(),
                 };
@@ -228,18 +235,36 @@ async fn main() -> anyhow::Result<()> {
                     }
                 };
 
+                // todo: add vpn/proxy detection logic
+                // also block any known free services (glitch, onrender, etc)
+                {
+                    let mut connected_ips = connected_ips.lock().await;
+                    if connected_ips.len() <= connected_ips.capacity() {
+                        connected_ips.push(connection.remote_address().ip());
+                    } else {
+                        connection.close(VarInt::from_u32(67), b"bye buddy");
+                    }
+                }
+
                 // handshake msgs (clienthello/serverhello)
                 let mut crypto = match perform_handshake(&mut send_stream, &mut recv_stream).await {
                     Ok(c) => c,
                     Err(e) => {
                         tracing::error!("handshake failed for player {}: {}", player_id, e);
-                        connection.close(VarInt::from_u32(1), b"handshake Failed");
+                        connection.close(VarInt::from_u32(1), b"handshake Failed"); // rename in
+                                                                                    // prod
                         return;
                     }
                 };
 
                 tracing::info!("player {} connected - session encrypted", player_id);
-                conn_streams.insert(player_id, send_stream);
+                let send_crypto = crypto.clone();
+                let player_connection =
+                    crate::structs::bevy::PlayerConnection::new(send_stream, send_crypto); //               conn_streams.insert(player_id, send_stream);
+                {
+                    let aja = aja.try_lock().unwrap();
+                    aja.insert(player_id, Arc::new(Mutex::new(player_connection)));
+                }
 
                 // ok now everything else is encrypted with chacha20poly1305
                 let mut buf = [0u8; 2048];
@@ -340,6 +365,7 @@ async fn main() -> anyhow::Result<()> {
     // maybe reduce interval idk
     let mut interval = tokio::time::interval(Duration::from_millis(67));
 
+    let aja = aj.clone();
     loop {
         interval.tick().await;
 
@@ -348,11 +374,25 @@ async fn main() -> anyhow::Result<()> {
         while let Ok((id, msg)) = input_rx.try_recv() {
             match msg {
                 InternalGameMessages::AddPlayer(p) => {
-                    let entity = world.bevy_world.spawn(p).id();
+                    let entity = world.bevy_world.spawn(p.clone()).id();
                     let mut player_map = world
                         .bevy_world
                         .get_resource_or_insert_with(PlayerMap::default);
                     player_map.map.insert(id, entity);
+
+                    {
+                        println!("{:?}", p);
+                        let aja = aja.try_lock().unwrap();
+                        // broadcast as test for now
+                        World::broadcast(
+                            encode(1, shared::to_client::Player::from(p))
+                                .map_err(|_| println!("jaja"))
+                                .unwrap()
+                                .as_slice(),
+                            &*aja,
+                        )
+                        .await;
+                    }
                 }
                 InternalGameMessages::MovePlayer(move_dir) => {
                     if let Some(player_map) = world.bevy_world.get_resource::<PlayerMap>() {
@@ -389,16 +429,29 @@ where
         .map_err(|_| GameError::Client(errors::ClientProducedError::FaultyMessage))
 }
 
+fn encode<T>(opcode: u8, data: T) -> Result<Vec<u8>, GameError>
+where
+    T: borsh::BorshSerialize,
+{
+    let mut v = vec![opcode];
+    let serialized = borsh::to_vec(&data)
+        .map_err(|_| GameError::Client(errors::ClientProducedError::FaultyMessage))?;
+    v.extend(serialized);
+    Ok(v)
+}
+
 struct PlayerSession {
     id: u8,
-    streams: Arc<DashMap<u8, SendStream>>,
+    connections: Arc<Mutex<DashMap<u8, Arc<Mutex<crate::structs::bevy::PlayerConnection>>>>>,
     players: Arc<DashMap<u8, Player>>,
     tx: god::Sender<(u8, InternalGameMessages)>,
 }
 
 impl Drop for PlayerSession {
     fn drop(&mut self) {
-        self.streams.remove(&self.id);
+        if let Some(map) = self.connections.try_lock() {
+            map.remove(&self.id);
+        }
         self.players.remove(&self.id);
         let _ = self
             .tx

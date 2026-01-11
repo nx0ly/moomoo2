@@ -4,6 +4,7 @@ use shared::structs::server::Player;
 const PLAYER_ACCEL: f32 = 1.13;
 const PLAYER_DECEL: f32 = 0.998;
 const PLAYER_SPEED: f32 = 50.;
+const PLAYER_RESISTANCE: f32 = 1.0;
 
 pub fn movement_system(mut query: Query<(&mut Player)>) {
     query.par_iter_mut().for_each(|mut player| {

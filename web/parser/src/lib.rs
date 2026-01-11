@@ -1,21 +1,24 @@
 use serde::Serialize;
+use shared::to_client::Player as JJJJ;
 use shared::{
+    PacketType,
     structs::client::{JsMove, JsPlayer},
     structs::server::Move,
     to_server::SpawnMessage,
-    PacketType,
 };
 use wasm_bindgen::prelude::*;
 
-use chacha20poly1305::{
-    aead::{Aead, KeyInit},
-    ChaCha20Poly1305, Key, Nonce,
-};
-use x25519_dalek::{PublicKey, StaticSecret};
-use pqc_kyber::{decapsulate, keypair, KYBER_PUBLICKEYBYTES, KYBER_SECRETKEYBYTES, KYBER_CIPHERTEXTBYTES};
-use sha2::Sha256;
-use hkdf::Hkdf;
 use borsh_derive::{BorshDeserialize, BorshSerialize};
+use chacha20poly1305::{
+    ChaCha20Poly1305, Key, Nonce,
+    aead::{Aead, KeyInit},
+};
+use hkdf::Hkdf;
+use pqc_kyber::{
+    KYBER_CIPHERTEXTBYTES, KYBER_PUBLICKEYBYTES, KYBER_SECRETKEYBYTES, decapsulate, keypair,
+};
+use sha2::Sha256;
+use x25519_dalek::{PublicKey, StaticSecret};
 
 #[derive(BorshSerialize, BorshDeserialize)]
 struct ClientHello {
@@ -48,7 +51,7 @@ impl SessionCrypto {
     pub fn encrypt(&mut self, plaintext: &[u8]) -> Result<Vec<u8>, JsValue> {
         let nonce = Self::make_nonce(self.send_nonce);
         self.send_nonce = self.send_nonce.wrapping_add(1);
-        
+
         self.cipher
             .encrypt(&nonce, plaintext)
             .map_err(|e| JsValue::from_str(&format!("encryption failed: {}", e)))
@@ -58,7 +61,7 @@ impl SessionCrypto {
     pub fn decrypt(&mut self, ciphertext: &[u8]) -> Result<Vec<u8>, JsValue> {
         let nonce = Self::make_nonce(self.recv_nonce);
         self.recv_nonce = self.recv_nonce.wrapping_add(1);
-        
+
         self.cipher
             .decrypt(&nonce, ciphertext)
             .map_err(|e| JsValue::from_str(&format!("decryption failed: {}", e)))
@@ -87,7 +90,7 @@ impl HandshakeState {
     #[wasm_bindgen]
     pub fn create_client_hello() -> Result<HandshakeStateAndMessage, JsValue> {
         let mut rng = rand_core::OsRng;
-        
+
         let x25519_secret = StaticSecret::random_from_rng(rng);
         let x25519_public = PublicKey::from(&x25519_secret);
 
@@ -121,14 +124,10 @@ impl HandshakeState {
     }
 
     #[wasm_bindgen]
-    pub fn complete_handshake(
-        self,
-        server_hello_bytes: &[u8],
-    ) -> Result<SessionCrypto, JsValue> {
+    pub fn complete_handshake(self, server_hello_bytes: &[u8]) -> Result<SessionCrypto, JsValue> {
         let server_hello: ServerHello = borsh::from_slice(server_hello_bytes)
             .map_err(|e| JsValue::from_str(&format!("failed to parse ServerHello: {}", e)))?;
 
-        // Validate ciphertext size
         if server_hello.kyber_ct.len() != KYBER_CIPHERTEXTBYTES {
             return Err(JsValue::from_str(&format!(
                 "invalid kyber ciphertext size: expected {}, got {}",
@@ -137,16 +136,16 @@ impl HandshakeState {
             )));
         }
 
-        let x25519_secret_bytes: [u8; 32] = self.x25519_secret
+        let x25519_secret_bytes: [u8; 32] = self
+            .x25519_secret
             .try_into()
             .map_err(|_| JsValue::from_str("invalid x25519 secret key length"))?;
         let x25519_secret = StaticSecret::from(x25519_secret_bytes);
 
-        // Perform X25519 ECDH
+        // x25519 ecdh
         let server_x25519_pk = PublicKey::from(server_hello.x25519_pk);
         let x25519_shared = x25519_secret.diffie_hellman(&server_x25519_pk);
 
-        // Decapsulate Kyber ciphertext
         let kyber_shared = decapsulate(&server_hello.kyber_ct, &self.kyber_secret)
             .map_err(|e| JsValue::from_str(&format!("kyber decapsulation failed: {:?}", e)))?;
 
@@ -184,10 +183,7 @@ impl HandshakeStateAndMessage {
     }
 
     #[wasm_bindgen]
-    pub fn complete_handshake(
-        self,
-        server_hello_bytes: &[u8],
-    ) -> Result<SessionCrypto, JsValue> {
+    pub fn complete_handshake(self, server_hello_bytes: &[u8]) -> Result<SessionCrypto, JsValue> {
         self.state.complete_handshake(server_hello_bytes)
     }
 }
@@ -209,7 +205,7 @@ pub fn decode_bytes(bytes: &[u8]) -> Result<JsValue, JsValue> {
     match opcode {
         Some(code) => match PacketType::from_u8(*code) {
             Some(PacketType::Spawn) => {
-                let data = borsh::from_slice::<JsPlayer>(&bytes[1..])
+                let data = borsh::from_slice::<JJJJ>(&bytes[1..])
                     .map_err(|e| JsValue::from_str(&format!("error decoding player {}", e)))?;
                 let packet = DecodedPacket { code: *code, data };
 
@@ -239,7 +235,10 @@ pub fn encode_into_bytes(packet: JsValue, opcode: u8) -> Result<Box<[u8]>, JsVal
             let spawn: SpawnMessage = serde_wasm_bindgen::from_value(packet)
                 .map_err(|x| JsValue::from_str(&x.to_string()))?;
             if let Err(e) = borsh::to_writer(&mut buf, &spawn) {
-                return Err(JsValue::from_str(&format!("error encoding spawn msg {}", e)));
+                return Err(JsValue::from_str(&format!(
+                    "error encoding spawn msg {}",
+                    e
+                )));
             }
         }
         2 => {
