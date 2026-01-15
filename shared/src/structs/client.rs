@@ -64,7 +64,7 @@ impl From<Player> for JsPlayer {
 #[wasm_bindgen]
 #[derive(BorshSerialize, Deserialize, Serialize)]
 pub struct JsMove {
-    dir: f32,
+    dir: Option<f32>,
 }
 
 #[cfg(feature = "web")]

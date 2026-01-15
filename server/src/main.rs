@@ -1,6 +1,7 @@
 use std::{
     sync::{atomic::AtomicU8, Arc},
     time::Duration,
+    vec,
 };
 
 use chacha20poly1305::{
@@ -15,13 +16,17 @@ use x25519_dalek::{EphemeralSecret, PublicKey};
 use bevy_ecs::prelude::*;
 use dashmap::DashMap;
 use parking_lot::Mutex;
-use shared::to_server::SpawnMessage;
-use shared::PacketType;
+use shared::{PacketType, to_server::MoveMessage};
 use shared::{
     structs::server::{Move, Player},
     Packet,
 };
+use shared::{
+    to_client::{ClientMessages, PlayerTO},
+    to_server::SpawnMessage,
+};
 use tokio::sync::mpsc as god;
+use tokio::sync::Mutex as AsyncMutex;
 use wtransport::*;
 
 use hkdf::Hkdf;
@@ -127,7 +132,7 @@ async fn perform_handshake(
     let (kyber_ciphertext, kyber_shared_secret) =
         pqc_kyber::encapsulate(&client_hello.kyber_pk, &mut OsRng).unwrap();
 
-    // derive the session key using hkde-sha256
+    // derive the session key using hkdf-sha256
     // combine both secrets
     let mut combined_secret = Vec::with_capacity(32 + KYBER_SSBYTES);
     combined_secret.extend_from_slice(x25519_shared_secret.as_bytes());
@@ -173,7 +178,7 @@ async fn main() -> anyhow::Result<()> {
     let net_streams = id_to_stream.clone();
     let net_players = id_to_player.clone();
     let net_input_tx = input_tx.clone();
-    let aj = Arc::new(Mutex::new(DashMap::new()));
+    let player_connections = Arc::new(DashMap::new());
 
     let identity = Identity::load_pemfiles("cert.pem", "key.pem")
         .await
@@ -188,236 +193,309 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("port 6767");
 
     let player_count = AtomicU8::new(0);
-    let mut connected_ips = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::with_capacity(40)));
-    let aja = aj.clone();
+    let connected_ips = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::with_capacity(40)));
+
+    let player_connections_outer = player_connections.clone(); // clone for main scope
+    let net_players_for_task = net_players.clone();
+
     // spawn networking task
-    tokio::spawn(async move {
-        loop {
-            let session_req = match server.accept().await.await {
-                Ok(req) => req,
-                Err(e) => {
-                    tracing::error!("failed to accept session: {}", e);
-                    continue;
-                }
-            };
-
-            let player_id = player_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-
-            let conn_streams = net_streams.clone();
-            let conn_players = net_players.clone();
-            let tx = net_input_tx.clone();
-            let mut connected_ips = connected_ips.clone();
-            let aja = aja.clone();
-
-            tokio::spawn(async move {
-                let _session = PlayerSession {
-                    id: player_id,
-                    connections: aja.clone(),
-                    players: conn_players.clone(),
-                    tx: tx.clone(),
-                };
-
-                let mut rng = WyRand::new();
-
-                let connection = match session_req.accept().await {
-                    Ok(conn) => conn,
+    tokio::spawn({
+        let player_connections_task = player_connections_outer.clone(); // clone for task
+        async move {
+            loop {
+                let session_req = match server.accept().await.await {
+                    Ok(req) => req,
                     Err(e) => {
-                        tracing::error!("failed to accept connection: {}", e);
-                        return;
-                    }
-                };
-
-                let (mut send_stream, mut recv_stream) = match connection.accept_bi().await {
-                    Ok(streams) => streams,
-                    Err(e) => {
-                        tracing::error!("failed to open bidirectional stream: {}", e);
-                        return;
-                    }
-                };
-
-                // todo: add vpn/proxy detection logic
-                // also block any known free services (glitch, onrender, etc)
-                {
-                    let mut connected_ips = connected_ips.lock().await;
-                    if connected_ips.len() <= connected_ips.capacity() {
-                        connected_ips.push(connection.remote_address().ip());
-                    } else {
-                        connection.close(VarInt::from_u32(67), b"bye buddy");
-                    }
-                }
-
-                // handshake msgs (clienthello/serverhello)
-                let mut crypto = match perform_handshake(&mut send_stream, &mut recv_stream).await {
-                    Ok(c) => c,
-                    Err(e) => {
-                        tracing::error!("handshake failed for player {}: {}", player_id, e);
-                        connection.close(VarInt::from_u32(1), b"handshake Failed"); // rename in
-                                                                                    // prod
-                        return;
-                    }
-                };
-
-                tracing::info!("player {} connected - session encrypted", player_id);
-                let send_crypto = crypto.clone();
-                let player_connection =
-                    crate::structs::bevy::PlayerConnection::new(send_stream, send_crypto); //               conn_streams.insert(player_id, send_stream);
-                {
-                    let aja = aja.try_lock().unwrap();
-                    aja.insert(player_id, Arc::new(Mutex::new(player_connection)));
-                }
-
-                // ok now everything else is encrypted with chacha20poly1305
-                let mut buf = [0u8; 2048];
-
-                loop {
-                    let ciphertext_len = match recv_stream.read(&mut buf).await {
-                        Ok(None) => break,
-                        Ok(Some(len)) => len,
-                        Err(e) => {
-                            tracing::error!("stream read error: {}", e);
-                            return;
-                        }
-                    };
-
-                    let plaintext = match crypto.decrypt(&buf[..ciphertext_len]) {
-                        Ok(data) => data,
-                        Err(_) => {
-                            tracing::warn!(
-                                "decryption failed for player {} - possible replay attack",
-                                player_id
-                            );
-                            connection.close(VarInt::from_u32(2), b"why ass");
-                            return;
-                        }
-                    };
-
-                    if plaintext.is_empty() {
+                        tracing::error!("failed to accept session: {}", e);
                         continue;
                     }
+                };
 
-                    let opcode = match plaintext.first() {
-                        Some(op) => *op,
-                        None => {
-                            connection.close(VarInt::from_u32(67), b"why ass");
+                let player_id = player_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+                let conn_streams = net_streams.clone();
+                let conn_players = net_players_for_task.clone();
+                let tx = net_input_tx.clone();
+                let connected_ips = connected_ips.clone();
+                let player_connections_task = player_connections_task.clone(); // clone per connection
+
+                tokio::spawn(async move {
+                    let _session = PlayerSession {
+                        id: player_id,
+                        connections: player_connections_task.clone(),
+                        players: conn_players.clone(),
+                        tx: tx.clone(),
+                    };
+
+                    let mut rng = WyRand::new();
+
+                    let connection = match session_req.accept().await {
+                        Ok(conn) => conn,
+                        Err(e) => {
+                            tracing::error!("failed to accept connection: {}", e);
                             return;
                         }
                     };
 
-                    match PacketType::from_u8(opcode) {
-                        Some(PacketType::Spawn) => {
-                            let data = match decode::<SpawnMessage>(&plaintext[1..]) {
-                                Ok(data) => data,
-                                Err(_) => {
-                                    connection.close(VarInt::from_u32(67), b"why ass");
-                                    return;
-                                }
-                            };
-
-                            let r = rng.generate::<u64>();
-                            let x = (r & 0xFFFF_FFFF) as f32 / u32::MAX as f32;
-                            let y = (r >> 32) as f32 / u32::MAX as f32;
-
-                            if tx
-                                .send((
-                                    player_id,
-                                    InternalGameMessages::AddPlayer(Player {
-                                        name: data.name,
-                                        x,
-                                        y,
-                                        id: player_id,
-                                        move_dir: None,
-                                        vx: 0.,
-                                        vy: 0.,
-                                        attacked: false,
-                                        weapon_index: Some(0),
-                                    }),
-                                ))
-                                .await
-                                .is_err()
-                            {
-                                tracing::error!("failed to send spawn message to ECS");
-                            }
+                    let (mut send_stream, mut recv_stream) = match connection.accept_bi().await {
+                        Ok(streams) => streams,
+                        Err(e) => {
+                            tracing::error!("failed to open bidirectional stream: {}", e);
+                            return;
                         }
-                        Some(PacketType::Move) => {
-                            if tx
-                                .send((
-                                    player_id,
-                                    InternalGameMessages::MovePlayer(Move { dir: 3.1 }),
-                                ))
-                                .await
-                                .is_err()
-                            {
-                                tracing::error!("failed to send move message to ECS");
-                            }
-                        }
-                        None => {
-                            tracing::warn!("unknown packet type: {}", opcode);
+                    };
+
+                    {
+                        let mut ips = connected_ips.lock().await;
+                        if ips.len() < ips.capacity() {
+                            ips.push(connection.remote_address().ip());
+                        } else {
+                            connection.close(VarInt::from_u32(67), b"bye buddy");
                         }
                     }
-                }
 
-                tracing::info!("player {} gone", player_id);
-            });
+                    let mut crypto =
+                        match perform_handshake(&mut send_stream, &mut recv_stream).await {
+                            Ok(c) => c,
+                            Err(e) => {
+                                tracing::error!("handshake failed for player {}: {}", player_id, e);
+                                connection.close(VarInt::from_u32(1), b"handshake Failed");
+                                return;
+                            }
+                        };
+
+                    tracing::info!("player {} connected - session encrypted", player_id);
+
+                    let send_crypto = crypto.clone();
+                    let player_connection =
+                        crate::structs::bevy::PlayerConnection::new(send_stream, send_crypto);
+
+                    {
+                        let mut connections_map = player_connections_task;
+                        connections_map
+                            .insert(player_id, Arc::new(AsyncMutex::new(player_connection)));
+                    }
+
+                    let mut buf = [0u8; 2048];
+
+                    loop {
+                        let ciphertext_len = match recv_stream.read(&mut buf).await {
+                            Ok(None) => break,
+                            Ok(Some(len)) => len,
+                            Err(e) => {
+                                tracing::error!("stream read error: {}", e);
+                                return;
+                            }
+                        };
+
+                        let plaintext = match crypto.decrypt(&buf[..ciphertext_len]) {
+                            Ok(data) => data,
+                            Err(_) => {
+                                tracing::warn!(
+                                    "decryption failed for player {} - possible replay attack",
+                                    player_id
+                                );
+                                connection.close(VarInt::from_u32(2), b"why ass");
+                                return;
+                            }
+                        };
+
+                        if plaintext.is_empty() {
+                            continue;
+                        }
+
+                        let opcode = plaintext[0];
+                        match PacketType::from_u8(opcode) {
+                            Some(PacketType::Spawn) => {
+                                let data = match decode::<SpawnMessage>(&plaintext[1..]) {
+                                    Ok(data) => data,
+                                    Err(_) => {
+                                        connection.close(VarInt::from_u32(67), b"why ass");
+                                        return;
+                                    }
+                                };
+
+                                let r = rng.generate::<u64>();
+                                let x = (r & 0xFFFF_FFFF) as f32 / u32::MAX as f32;
+                                let y = (r >> 32) as f32 / u32::MAX as f32;
+
+                                if tx
+                                    .send((
+                                        player_id,
+                                        InternalGameMessages::AddPlayer(Player {
+                                            name: data.name,
+                                            x,
+                                            y,
+                                            id: player_id,
+                                            move_dir: None,
+                                            vx: 0.,
+                                            vy: 0.,
+                                            attacked: false,
+                                            weapon_index: Some(0),
+                                        }),
+                                    ))
+                                    .await
+                                    .is_err()
+                                {
+                                    tracing::error!("failed to send spawn message to ECS");
+                                }
+                            }
+                            Some(PacketType::Move) => {
+                                let data = match decode::<MoveMessage>(&plaintext[1..]) {
+                                    Ok(data) => data,
+                                    Err(_) => {
+                                        connection.close(VarInt::from_u32(67), b"why ass");
+                                        return;
+                                    }
+                                };
+
+                                if tx
+                                    .send((
+                                        player_id,
+                                        InternalGameMessages::MovePlayer(Move { dir: data.dir }),
+                                    ))
+                                    .await
+                                    .is_err()
+                                {
+                                    tracing::error!("failed to send move message to ECS");
+                                }
+                            }
+
+                            _ => {}
+                            None => tracing::warn!("unknown packet type: {}", opcode),
+                        }
+                    }
+
+                    tracing::info!("player {} disconnected", player_id);
+                });
+            }
         }
     });
 
     schedule.add_systems(systems::movement_system);
-    // maybe reduce interval idk
+
     let mut interval = tokio::time::interval(Duration::from_millis(67));
 
-    let aja = aj.clone();
     loop {
         interval.tick().await;
 
-        let mut world = world.lock();
+        let mut world_locked = world.lock();
 
         while let Ok((id, msg)) = input_rx.try_recv() {
             match msg {
                 InternalGameMessages::AddPlayer(p) => {
-                    let entity = world.bevy_world.spawn(p.clone()).id();
-                    let mut player_map = world
+                    let entity = world_locked.bevy_world.spawn(p.clone()).id();
+                    let mut player_map = world_locked
                         .bevy_world
                         .get_resource_or_insert_with(PlayerMap::default);
                     player_map.map.insert(id, entity);
 
+                    // lol this code is so bad
                     {
                         println!("{:?}", p);
-                        let aja = aja.try_lock().unwrap();
+                        let p_clone = p.clone();
+
                         // broadcast as test for now
-                        World::broadcast(
-                            encode(1, shared::to_client::Player::from(p))
-                                .map_err(|_| println!("jaja"))
-                                .unwrap()
-                                .as_slice(),
-                            &*aja,
-                        )
-                        .await;
+                        for mut entry in player_connections.iter_mut() {
+                            let p_data = p_clone.clone();
+                            let id_entry = *entry.key();
+                            let conn = entry.value_mut();
+
+                            if id_entry == p_clone.id {
+                                let _ = conn
+                                    .try_lock()
+                                    .unwrap()
+                                    .send_encrypted(
+                                        encode(
+                                            1,
+                                            ClientMessages::AddPlayer(
+                                                shared::to_client::AddPlayerData {
+                                                    is_mine: true,
+                                                    data: PlayerTO::from(p_data),
+                                                },
+                                            ),
+                                        )
+                                        .unwrap()
+                                        .as_slice(),
+                                    )
+                                    .await;
+                            } else {
+                                let _ = conn
+                                    .try_lock()
+                                    .unwrap()
+                                    .send_encrypted(
+                                        encode(
+                                            1,
+                                            ClientMessages::AddPlayer(
+                                                shared::to_client::AddPlayerData {
+                                                    is_mine: false,
+                                                    data: PlayerTO::from(p_data),
+                                                },
+                                            ),
+                                        )
+                                        .unwrap()
+                                        .as_slice(),
+                                    )
+                                    .await;
+                            }
+                        }
                     }
                 }
                 InternalGameMessages::MovePlayer(move_dir) => {
-                    if let Some(player_map) = world.bevy_world.get_resource::<PlayerMap>() {
+                    if let Some(player_map) = world_locked.bevy_world.get_resource::<PlayerMap>() {
                         if let Some(&entity) = player_map.map.get(&id) {
-                            if let Some(mut player) = world.bevy_world.get_mut::<Player>(entity) {
-                                player.move_dir = Some(move_dir.dir);
+                            if let Some(mut player) =
+                                world_locked.bevy_world.get_mut::<Player>(entity)
+                            {
+                                println!("move dir set");
+                                player.move_dir = move_dir.dir;
                             }
                         }
                     }
                 }
                 InternalGameMessages::Disconnect => {
-                    if let Some(player_map) = world.bevy_world.get_resource::<PlayerMap>() {
+                    if let Some(player_map) = world_locked.bevy_world.get_resource::<PlayerMap>() {
                         if let Some(&entity) = player_map.map.get(&id) {
-                            if let Some(player) = world.bevy_world.get::<Player>(entity) {
+                            if let Some(player) = world_locked.bevy_world.get::<Player>(entity) {
                                 tracing::info!("player {} ({}) gone", player.name, id);
                             }
-                            world.bevy_world.despawn(entity);
+                            world_locked.bevy_world.despawn(entity);
                         }
                     }
                 }
             }
         }
 
-        schedule.run(&mut world.bevy_world);
-        drop(world);
+        schedule.run(&mut world_locked.bevy_world);
+
+        {
+            let mut wiped_players = Vec::new();
+
+            for player in world_locked
+                .bevy_world
+                .query::<&Player>()
+                .iter(&world_locked.bevy_world)
+            {
+                wiped_players.push(PlayerTO::from(player.clone()));
+            }
+
+            {
+                World::broadcast(
+                    encode(
+                        3,
+                        shared::to_client::UpdatePlayerData {
+                            players: wiped_players,
+                        },
+                    )
+                    .unwrap()
+                    .as_slice(),
+                    &player_connections,
+                )
+                .await;
+            }
+        }
+
+        drop(world_locked);
     }
 }
 
@@ -442,16 +520,15 @@ where
 
 struct PlayerSession {
     id: u8,
-    connections: Arc<Mutex<DashMap<u8, Arc<Mutex<crate::structs::bevy::PlayerConnection>>>>>,
+    connections: Arc<DashMap<u8, Arc<AsyncMutex<crate::structs::bevy::PlayerConnection>>>>,
     players: Arc<DashMap<u8, Player>>,
     tx: god::Sender<(u8, InternalGameMessages)>,
 }
 
 impl Drop for PlayerSession {
     fn drop(&mut self) {
-        if let Some(map) = self.connections.try_lock() {
-            map.remove(&self.id);
-        }
+        self.connections.remove(&self.id);
+
         self.players.remove(&self.id);
         let _ = self
             .tx

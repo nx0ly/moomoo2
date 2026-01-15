@@ -44,5 +44,5 @@ impl From<JsPlayer> for Player {
 #[derive(Debug, Clone, BorshDeserialize, BorshSerialize)]
 #[cfg_attr(feature = "web", derive(Serialize, Deserialize))]
 pub struct Move {
-    pub dir: f32,
+    pub dir: Option<f32>,
 }

@@ -10,7 +10,7 @@ pub struct SpawnMessage {
 #[derive(Debug, Clone, BorshDeserialize, BorshSerialize)]
 #[cfg_attr(feature = "web", derive(Serialize, Deserialize))]
 pub struct MoveMessage {
-    pub dir: f32,
+    pub dir: Option<f32>,
 }
 
 #[derive(Debug, Clone, BorshDeserialize, BorshSerialize)]

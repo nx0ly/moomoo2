@@ -14,6 +14,7 @@
    <link href="https://fonts.googleapis.com/icon?family=Material+Icons"
       rel="stylesheet">
 
+         <script type="module" src="/src/game.js"></script>
 </head>
 
 <body>
@@ -27,12 +28,6 @@
    <script
       src="https://web.archive.org/web/20190120075244js_/https://cdnjs.cloudflare.com/ajax/libs/howler/2.0.4/howler.core.min.js"></script>
   
-
-   <script>
-    </script>
-   <script type="module" src="/src/game.js">
-   const game = new Game();
-game.init();</script>
    <!-- MAIN CANVAS -->
    <canvas id="mainCanvas" oncontextmenu="return false;"></canvas>
    <!-- VIGNETTE -->
@@ -131,7 +126,7 @@ game.init();</script>
             <div id="nameInputParent">
                <input type="text" id="nameInput" maxlength="16" placeholder="Enter Name"
                   ontouchend="touchPrompt(event, 'Enter username:')" autofocus></input>
-               <div class="menuButton" id="goButton" onclick="enterGame()">
+               <div class="menuButton" id="goButton">
                   <i class="material-icons" style="color:#fff;font-size:32px;">&#xE037;</i>
                </div>
             </div>

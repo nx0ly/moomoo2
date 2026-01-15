@@ -1,5 +1,5 @@
 use serde::Serialize;
-use shared::to_client::Player as JJJJ;
+use shared::to_client::{AddPlayerData, ClientMessages, UpdatePlayerData};
 use shared::{
     PacketType,
     structs::client::{JsMove, JsPlayer},
@@ -205,8 +205,13 @@ pub fn decode_bytes(bytes: &[u8]) -> Result<JsValue, JsValue> {
     match opcode {
         Some(code) => match PacketType::from_u8(*code) {
             Some(PacketType::Spawn) => {
-                let data = borsh::from_slice::<JJJJ>(&bytes[1..])
+                let data = borsh::from_slice::<ClientMessages>(&bytes[1..])
                     .map_err(|e| JsValue::from_str(&format!("error decoding player {}", e)))?;
+
+                let data = match data {
+                    ClientMessages::AddPlayer(d) => d,
+                };
+
                 let packet = DecodedPacket { code: *code, data };
 
                 Ok(serde_wasm_bindgen::to_value(&packet)
@@ -219,6 +224,14 @@ pub fn decode_bytes(bytes: &[u8]) -> Result<JsValue, JsValue> {
 
                 Ok(serde_wasm_bindgen::to_value(&packet)
                     .map_err(|e| JsValue::from_str(&e.to_string()))?)
+            }
+            Some(PacketType::UpdatePlayers) => {
+                let data = borsh::from_slice::<UpdatePlayerData>(&bytes[1..]).map_err(|e| JsValue::from_str(&format!("error decoding updateplayers {}", e)))?;
+                let packet = DecodedPacket {code: *code, data};
+
+                                Ok(serde_wasm_bindgen::to_value(&packet)
+                    .map_err(|e| JsValue::from_str(&e.to_string()))?)
+
             }
             None => Err(JsValue::from_str("unknown opcode")),
         },

@@ -1,24 +1,47 @@
-import { Player } from "./assets/player";
-import { Application, Assets, Container, Sprite } from "pixi.js";
+import {
+  Application,
+  Assets,
+  Container,
+  Sprite,
+  Text,
+  TextStyle,
+} from "pixi.js";
 import init, {
   decode_bytes,
   encode_into_bytes,
   HandshakeState,
   SessionCrypto,
 } from "../parser/pkg/parser";
+import { Render } from "./render/renderer";
+import utils from "./utils";
+import Player from "./objects/player";
 
 export class Game {
-  async init() {
-    console.log("OKOK");
-    this.app = new Application();
-    // set functions and events
-    console.log(document.getElementById("goButton"));
-    document.getElementById("goButton").addEventListener("click", async () => {
-      await this.spawnButtonClick();
-      console.log("ok");
-    });
+  constructor() {
+    this.renderer = new Render(this);
 
+    this.players = [];
+    this.objects = [];
+
+    this.my_player = null;
+
+    this.moveInput = { up: false, down: false, left: false, right: false };
+    this.zoomDelta = 0;
+
+    this.utils = {
+      game: this,
+    };
+    utils.bind(this.utils)();
+  }
+
+  async init() {
     await init();
+    await this.renderer.init();
+
+    // hooks
+    document.getElementById("goButton").addEventListener("click", async () => {
+      await this.enterGame();
+    });
 
     this.wt = new WebTransport("https://127.0.0.1:6767");
     await this.wt.ready;
@@ -47,26 +70,62 @@ export class Game {
     console.log(`send nonce: ${this.crypto.get_send_nonce()}`);
     console.log(`receive nonce: ${this.crypto.get_recv_nonce()}`);
 
-    await this.app.init({
-      view: document.getElementById("mainCanvas"),
-      background: "#000",
-      resizeTo: window,
-      resolution: 2,
-    });
-
-    let container = new Container();
-    this.app.stage.addChild(container);
-
     this.read();
+
+    window.addEventListener("keydown", this.handleKey);
+    window.addEventListener("keyup", this.handleKey);
+    window.addEventListener("wheel", this.handleWheel, { passive: true });
   }
 
-  async spawnButtonClick() {
+  handleKey = (e) => {
+    const down = e.type === "keydown";
+    if (e.key === "w" || e.key === "ArrowUp") this.moveInput.up = down;
+    if (e.key === "s" || e.key === "ArrowDown") this.moveInput.down = down;
+    if (e.key === "a" || e.key === "ArrowLeft") this.moveInput.left = down;
+    if (e.key === "d" || e.key === "ArrowRight") this.moveInput.right = down;
+
+    this.sendInput();
+  };
+
+  handleWheel = (e) => {
+    this.zoomDelta += e.deltaY > 0 ? -0.1 : 0.1;
+    this.renderer.camera.zoom = Math.max(
+      0.5,
+      Math.min(3, this.renderer.camera.zoom + this.zoomDelta)
+    );
+    this.zoomDelta = 0;
+  };
+
+  sendInput = () => {
+    if (!this.my_player) return;
+
+    let dir = null;
+    if (
+      this.moveInput.up ||
+      this.moveInput.down ||
+      this.moveInput.left ||
+      this.moveInput.right
+    ) {
+      const dx = (this.moveInput.right ? 1 : 0) - (this.moveInput.left ? 1 : 0);
+      const dy = (this.moveInput.down ? 1 : 0) - (this.moveInput.up ? 1 : 0);
+      dir = Math.atan2(dy, dx);
+    }
+
+    console.warn(dir);
+    this.sendMove(dir);
+  };
+
+  async enterGame() {
     const spawnData = {
-      name: "why god javedpension?",
+      name: document.getElementById("nameInput").value,
     };
 
     await this.sendEncrypted(spawnData, 1);
     console.log("spawn msg sent");
+
+    document.getElementById("mainMenuContainer").remove();
+    document.getElementById("darkener").remove();
+    document.getElementById("vignette").remove();
   }
 
   async sendEncrypted(data, opcode) {
@@ -86,36 +145,42 @@ export class Game {
   }
 
   async read() {
-    if (!this.reader || !this.crypto) {
-      throw new Error("cannot read - stream or encryption not initialized");
-    }
+    const buf = new Uint8Array(4096);
+    let buffered = new Uint8Array(0);
 
     try {
       while (true) {
         const { value, done } = await this.reader.read();
-        if (done) {
-          console.log("stream closed by server");
-          break;
-        }
-
+        if (done) break;
         if (!value) continue;
 
-        try {
-          const plaintext = this.crypto.decrypt(value);
+        const newBuf = new Uint8Array(buffered.length + value.length);
+        newBuf.set(buffered);
+        newBuf.set(value, buffered.length);
+        buffered = newBuf;
 
-          const packet = decode_bytes(plaintext);
+        while (buffered.length >= 4) {
+          const len = new DataView(
+            buffered.buffer,
+            buffered.byteOffset
+          ).getUint32(0, false);
 
-          console.log("OP:", packet);
+          if (buffered.length < 4 + len) break;
 
-          this.handlePacket(packet);
-        } catch (decryptError) {
-          console.error("failed to decrypt/decode packet:", decryptError);
+          const ciphertext = buffered.slice(4, 4 + len);
+          buffered = buffered.slice(4 + len);
+
+          try {
+            const plaintext = this.crypto.decrypt(ciphertext);
+            const packet = decode_bytes(plaintext);
+            this.handlePacket(packet);
+          } catch (e) {
+            console.error("decrypt error:", e);
+          }
         }
       }
     } catch (e) {
-      console.error("stream closed:", e);
-    } finally {
-      this.cleanup();
+      console.error("stream error:", e);
     }
   }
 
@@ -123,12 +188,68 @@ export class Game {
     switch (packet.code) {
       case 1:
         console.log("player spawned:", packet.data);
-        // TODO: Add player to game
+
+        let { is_mine, data } = packet.data;
+
+        let player = new Player(data);
+        game.players.push(player);
+        if (is_mine) {
+          game.my_player = player;
+        }
+
+        if (!this.renderer.player_id_to_sprite[player.id]) {
+          this.renderer.player_id_to_sprite[player.id] = new Sprite(
+            this.renderer.textures.player_texture
+          );
+          this.renderer.player_id_to_sprite[player.id].anchor.set(0.5);
+
+          this.renderer.player_id_to_sprite[player.id].x = player.x;
+          this.renderer.player_id_to_sprite[player.id].y = player.y;
+
+          this.renderer.player_id_to_sprite[player.id].width = 80;
+          this.renderer.player_id_to_sprite[player.id].height = 80;
+
+          let nameText = new Text({
+            text: player.name,
+            style: new TextStyle({
+              fontFamily: "GameFont",
+              fontSize: 24,
+              fill: 0xffffff,
+              align: "center",
+              stroke: 0x000000,
+              strokeThickness: 4,
+            }),
+          });
+          nameText.anchor.set(0.5, 1);
+          this.renderer.player_id_to_sprite[player.id].nameText = nameText;
+
+          this.renderer.world.addChild(
+            this.renderer.player_id_to_sprite[player.id]
+          );
+          this.renderer.world.addChild(nameText);
+        }
+
         break;
 
       case 2:
         console.log("player moved:", packet.data);
-        // TODO: Update player position
+
+        break;
+
+      case 3:
+        let { players } = packet.data;
+        for (let player of players) {
+          let p = game.utils.findPlayerByID(player.id) || {};
+
+          p.x = player.x;
+          p.y = player.y;
+          p.weapon = player.weapon;
+
+          let player_sprite = this.renderer.player_id_to_sprite[p.id] || {};
+          player_sprite.x = p.x;
+          player_sprite.y = p.y;
+        }
+
         break;
 
       default:
@@ -138,6 +259,7 @@ export class Game {
 
   async sendMove(direction) {
     const moveData = { dir: direction };
+    console.log(moveData);
     await this.sendEncrypted(moveData, 2);
   }
 
@@ -176,9 +298,11 @@ export class Game {
     };
   }
 }
+
 const game = new Game();
-game.init();
-console.log("why ass", game);
+await game.init();
+
+console.log("why ass");
 var ui = 0;
 var mi = [
   function () {

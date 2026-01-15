@@ -1,12 +1,11 @@
-use std::{collections::HashMap, sync::Arc};
-
+use crate::SessionCrypto;
 use bevy_ecs::prelude::*;
 use dashmap::DashMap;
 use futures::future::join_all;
 use parking_lot::Mutex;
+use std::{collections::HashMap, sync::Arc};
+use tokio::sync::Mutex as AsyncMutex;
 use wtransport::SendStream;
-
-use crate::SessionCrypto;
 
 pub struct PlayerConnection {
     pub stream: SendStream,
@@ -23,6 +22,9 @@ impl PlayerConnection {
         plaintext: &[u8],
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let ciphertext = self.crypto.encrypt(plaintext).unwrap();
+
+        let len_bytes = (ciphertext.len() as u32).to_be_bytes();
+        self.stream.write_all(&len_bytes).await?;
         self.stream.write_all(&ciphertext).await?;
         Ok(())
     }
@@ -35,12 +37,12 @@ pub struct World {
 }
 pub type MWorld = Arc<Mutex<World>>;
 
-pub type IDToConnection = DashMap<u8, Arc<Mutex<PlayerConnection>>>;
+pub type IDToConnection = Arc<DashMap<u8, Arc<AsyncMutex<PlayerConnection>>>>;
 
 impl World {
     pub async fn send_to(id: u8, plaintext: &[u8], connections: &IDToConnection) {
         if let Some(conn_ref) = connections.get(&id) {
-            let mut conn = conn_ref.lock();
+            let mut conn = conn_ref.lock().await;
             if let Err(e) = conn.send_encrypted(plaintext).await {
                 tracing::warn!("failed to send packet to player {}: {}", id, e);
             }
@@ -53,7 +55,7 @@ impl World {
             let data = plaintext.to_vec();
 
             async move {
-                let mut lock = conn.lock();
+                let mut lock = conn.lock().await;
                 let _ = lock.send_encrypted(&data).await;
             }
         });
@@ -74,7 +76,7 @@ impl World {
                 let data = plaintext.to_vec();
 
                 async move {
-                    let mut lock = conn.lock();
+                    let mut lock = conn.lock().await;
                     let _ = lock.send_encrypted(&data).await;
                 }
             });
