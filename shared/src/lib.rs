@@ -5,14 +5,15 @@ pub mod structs;
 #[cfg(feature = "web")]
 use serde::{Deserialize, Serialize};
 use borsh_derive::{BorshSerialize};
-use crate::{structs::server::{Move, Player}, to_client::UpdatePlayerData};
+use crate::{structs::server::{Move, Player}, to_client::{MapChunkData, UpdatePlayerData}};
 
 #[derive(BorshSerialize)]
 #[cfg_attr(feature = "web", derive(Serialize, Deserialize))]
 pub enum Packet {
     Spawn(Player),
     Move(Move),
-    UpdatePlayers(UpdatePlayerData)
+    UpdatePlayers(UpdatePlayerData),
+    MapData(MapChunkData),
 }
 
 #[repr(u8)]
@@ -22,6 +23,7 @@ pub enum PacketType {
     Spawn = 1,
     Move = 2,
     UpdatePlayers = 3,
+    MapData = 4,
 }
 impl PacketType {
     pub fn from_u8(val: u8) -> Option<PacketType> {
@@ -29,6 +31,7 @@ impl PacketType {
             1 => Some(Self::Spawn),
             2 => Some(Self::Move),
             3 => Some(Self::UpdatePlayers),
+            4 => Some(Self::MapData),
             _ => None,
         }
     }

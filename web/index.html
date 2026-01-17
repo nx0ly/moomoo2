@@ -19,14 +19,10 @@
 
 <body>
    <!-- PRELOAD SCRIPTS -->
-   <script async src="//web.archive.org/web/20190120075244js_/https://platform.twitter.com/widgets.js"
-      charset="utf-8"></script>
    <script
-      src="https://web.archive.org/web/20190120075244js_/https://ajax.googleapis.com/ajax/libs/jquery/3.1.1/jquery.min.js"></script>
+      src="/src/lib/jquery.js"></script>
    <script
-      src="https://web.archive.org/web/20190120075244js_/https://cdnjs.cloudflare.com/ajax/libs/socket.io/1.4.5/socket.io.min.js"></script>
-   <script
-      src="https://web.archive.org/web/20190120075244js_/https://cdnjs.cloudflare.com/ajax/libs/howler/2.0.4/howler.core.min.js"></script>
+      src="/src/libs/howler.js"></script>
   
    <!-- MAIN CANVAS -->
    <canvas id="mainCanvas" oncontextmenu="return false;"></canvas>
@@ -53,8 +49,8 @@
    <!-- SHARED UI -->
    <div id="sharedUI">
       <div id="topMenuContainer">
-         <div id="killCount"></div>
-         <div id="playerCount"></div>
+         <div id="killCount">0 Kills</div>
+         <div id="playerCount">40 Alive</div>
       </div>
       <canvas id="minimap"></canvas>
       <div id="borderTimer">00:00</div>

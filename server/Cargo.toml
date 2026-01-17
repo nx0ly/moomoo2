@@ -33,3 +33,5 @@ sha2 = "0.10.9"
 pqc_kyber = { version = "0.7.1", features = ["kyber768", "90s", "avx2"] }
 hkdf = "0.12.4"
 nanorand = { version = "0.7.0", features = ["wyrand"] }
+noise = "0.9.0"
+futures-lite = "2.6.1"

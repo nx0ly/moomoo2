@@ -1,7 +1,7 @@
-# sidney god moomoo2 todo list
+# old todo list
 
 - [ ] Inventory System
-- [ ] Shirts and other Merch (are we deadass)
+- [ ] Shirts and other Merch
 - [ ] Chests where you can store items and resources so you dont lose them on death
 - [ ] Bosses
 - [ ] Events and Quests
@@ -10,19 +10,19 @@
 - [ ] More Weapons and Armor
 - [ ] New Animals and Improved AI
 - [ ] New Buildings, Turrets & Traps
-- [ ] Improved Graphics (wow very descriptive sidney)
-- [ ] Bigger Map with more Biomes (why repeat)
-- [ ] Place Objects anywhere and push them out from center if you build inside of another (easier to connect buildings) (what the fuck does this mean sidney)
+- [ ] Improved Graphics
+- [ ] Bigger Map with more Biomes
+- [ ] Place Objects anywhere and push them out from center if you build inside of another (easier to connect buildings)
 - [ ] More Challenge Icons (Currently MooMoo only has the skull for most kills)
 - [ ] More Tribe features like: Trading and Assigning Roles
-- [ ] Physics Blocks and Improved Collisions (PLS why so descriptive??)
+- [ ] Physics Blocks and Improved Collisions
 - [ ] TNT and other explosives
 - [ ] Improved Combat to prevent food spam scripts (essentially limit the amount of food to consume per tick)
 - [ ] Actual Anti bot scripts
 - [ ] Killable Nebula NPC
 - [ ] Texture Mod Support
 - [ ] Improved Animations (gonna interpret this as just proper lerping)
-- [ ] Account to track stats and buy skins (sidney god of descriptions)
+- [ ] Account to track stats and buy skins
 
 # my todo list personal
 - [ ] 1v1, 2v2, 3v3... nvn player fighting system.
@@ -35,8 +35,8 @@
 - [ ] buildings regenerate health over time
 - [ ] display building hp (either add cracks to buildings, maybe opacity bullshit, or just a plain hp bar that goes semi transparent when no interaction and re appears)
 
-## anti hack op
-i dont think the skids would create a hack for this, however if some guy with a brain does and shares it, here are some ideas to annoy them:
+
+
 
 - [ ] randomly offset bulltick by 1-2 ticks
 - [ ] if perfect aim, disconnect

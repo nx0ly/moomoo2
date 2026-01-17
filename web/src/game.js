@@ -125,7 +125,7 @@ export class Game {
 
     document.getElementById("mainMenuContainer").remove();
     document.getElementById("darkener").remove();
-    document.getElementById("vignette").remove();
+    // document.getElementById("vignette").remove();
   }
 
   async sendEncrypted(data, opcode) {
@@ -251,6 +251,13 @@ export class Game {
         }
 
         break;
+
+      case 4: 
+        console.log(packet);
+        const { c_x, c_y, tiles } = packet.data;
+        console.log(c_x, c_y, tiles)
+        this.renderer.upsertChunk(c_x, c_y, tiles);
+      break;
 
       default:
         console.warn("unknown packet type:", packet.code);

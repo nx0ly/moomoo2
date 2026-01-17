@@ -1,7 +1,6 @@
 use std::{
     sync::{atomic::AtomicU8, Arc},
     time::Duration,
-    vec,
 };
 
 use chacha20poly1305::{
@@ -10,34 +9,30 @@ use chacha20poly1305::{
 };
 
 use rand_core::OsRng;
-use sha2::{Digest, Sha256};
+use sha2::Sha256;
 use x25519_dalek::{EphemeralSecret, PublicKey};
 
 use bevy_ecs::prelude::*;
 use dashmap::DashMap;
 use parking_lot::Mutex;
-use shared::{PacketType, to_server::MoveMessage};
-use shared::{
-    structs::server::{Move, Player},
-    Packet,
-};
-use shared::{
-    to_client::{ClientMessages, PlayerTO},
-    to_server::SpawnMessage,
-};
+use shared::PacketType;
+use shared::structs::server::{Move, Player};
+use shared::to_client::{ClientMessages, PlayerTO, UpdatePlayerData};
+use shared::to_server::{MoveMessage, SpawnMessage};
 use tokio::sync::mpsc as god;
 use tokio::sync::Mutex as AsyncMutex;
 use wtransport::*;
 
 use hkdf::Hkdf;
-use pqc_kyber::{self, KYBER_PUBLICKEYBYTES, KYBER_SSBYTES};
+use pqc_kyber::{KYBER_PUBLICKEYBYTES, KYBER_SSBYTES};
 
 use nanorand::{Rng, WyRand};
 
 use crate::{
     config::config::load_config,
     errors::{GameError, InternalGameMessages},
-    structs::bevy::{PlayerMap, World},
+    structs::bevy::{PlayerMap, World, PlayerConnection},
+    systems::{ChunkStaging, OutboundMapQueue, PendingGen, WorldMap},
 };
 
 mod config;
@@ -50,13 +45,13 @@ use borsh_derive::{BorshDeserialize, BorshSerialize};
 #[derive(BorshSerialize, BorshDeserialize)]
 struct ClientHello {
     x25519_pk: [u8; 32],
-    kyber_pk: Vec<u8>, // kyber768 public key
+    kyber_pk: Vec<u8>,
 }
 
 #[derive(BorshSerialize, BorshDeserialize)]
 struct ServerHello {
     x25519_pk: [u8; 32],
-    kyber_ct: Vec<u8>, // kyber768 ciphertext (1088 bytes)
+    kyber_ct: Vec<u8>,
 }
 
 #[derive(Clone)]
@@ -76,7 +71,6 @@ impl SessionCrypto {
         }
     }
 
-    // format: [0,0,0,0 | counter_be_bytes]
     fn make_nonce(counter: u64) -> Nonce {
         let mut bytes = [0u8; 12];
         bytes[4..].copy_from_slice(&counter.to_be_bytes());
@@ -85,11 +79,11 @@ impl SessionCrypto {
 
     fn decrypt(&mut self, ciphertext: &[u8]) -> Result<Vec<u8>, chacha20poly1305::Error> {
         let nonce = Self::make_nonce(self.recv_nonce);
+        let plaintext = self.cipher.decrypt(&nonce, ciphertext)?;
         self.recv_nonce = self.recv_nonce.wrapping_add(1);
-        self.cipher.decrypt(&nonce, ciphertext)
+        Ok(plaintext)
     }
 
-    // encrypt outgoing with automatic increment
     fn encrypt(&mut self, plaintext: &[u8]) -> Result<Vec<u8>, chacha20poly1305::Error> {
         let nonce = Self::make_nonce(self.send_nonce);
         self.send_nonce = self.send_nonce.wrapping_add(1);
@@ -97,17 +91,14 @@ impl SessionCrypto {
     }
 }
 
-// performs a hybrid post-quantum key exchance (25519 & kyber768)
-// derives a session key using hkdf-sha256
 async fn perform_handshake(
     send: &mut SendStream,
     recv: &mut RecvStream,
 ) -> anyhow::Result<SessionCrypto> {
-    // make x25519 keypair
     let server_secret = EphemeralSecret::random_from_rng(OsRng);
     let server_public = PublicKey::from(&server_secret);
 
-    let mut buf = vec![0u8; 4096]; // Kyber768 PK is 1184 bytes + X25519 is 32 bytes + borsh overhead (thanks friend)
+    let mut buf = vec![0u8; 4096];
     let len = recv
         .read(&mut buf)
         .await?
@@ -115,38 +106,28 @@ async fn perform_handshake(
 
     let client_hello: ClientHello = borsh::from_slice(&buf[..len])?;
 
-    // x25519 ecdh
     let client_x25519_pk = PublicKey::from(client_hello.x25519_pk);
     let x25519_shared_secret = server_secret.diffie_hellman(&client_x25519_pk);
 
-    // verify size
     if client_hello.kyber_pk.len() != KYBER_PUBLICKEYBYTES {
-        return Err(anyhow::anyhow!(
-            "invalid kyber public key size: expected {}, got {}",
-            KYBER_PUBLICKEYBYTES,
-            client_hello.kyber_pk.len()
-        ));
+        return Err(anyhow::anyhow!("invalid kyber public key size"));
     }
 
-    // do kyber768 encapsulation
     let (kyber_ciphertext, kyber_shared_secret) =
         pqc_kyber::encapsulate(&client_hello.kyber_pk, &mut OsRng).unwrap();
 
-    // derive the session key using hkdf-sha256
-    // combine both secrets
     let mut combined_secret = Vec::with_capacity(32 + KYBER_SSBYTES);
     combined_secret.extend_from_slice(x25519_shared_secret.as_bytes());
     combined_secret.extend_from_slice(&kyber_shared_secret);
 
     let hkdf = Hkdf::<Sha256>::new(None, &combined_secret);
-
     let mut session_key = [0u8; 32];
     hkdf.expand(b"mumu", &mut session_key)
         .map_err(|_| anyhow::anyhow!("hkdf expansion failed"))?;
 
     let server_hello = ServerHello {
         x25519_pk: *server_public.as_bytes(),
-        kyber_ct: kyber_ciphertext[..].to_vec(),
+        kyber_ct: kyber_ciphertext.to_vec(),
     };
 
     let response_bytes = borsh::to_vec(&server_hello)?;
@@ -160,7 +141,6 @@ async fn perform_handshake(
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
-
     let config = load_config().expect("failed to load config");
 
     let world = Arc::new(Mutex::new(World {
@@ -168,22 +148,19 @@ async fn main() -> anyhow::Result<()> {
         config,
     }));
 
-    let id_to_stream: Arc<DashMap<u8, SendStream>> = Arc::new(DashMap::new());
-    let id_to_player: Arc<DashMap<u8, Player>> = Arc::new(DashMap::new());
+    {
+        let mut w = world.lock();
+        w.bevy_world.insert_resource(WorldMap { seed: 12345, ..Default::default() });
+        w.bevy_world.insert_resource(ChunkStaging::default());
+        w.bevy_world.insert_resource(PendingGen::default());
+        w.bevy_world.insert_resource(OutboundMapQueue::default());
+        w.bevy_world.insert_resource(PlayerMap::default());
+    }
 
-    let mut schedule = Schedule::default();
-
+    let player_connections: Arc<DashMap<u8, Arc<AsyncMutex<PlayerConnection>>>> = Arc::new(DashMap::new());
     let (input_tx, mut input_rx) = god::channel::<(u8, InternalGameMessages)>(1024);
 
-    let net_streams = id_to_stream.clone();
-    let net_players = id_to_player.clone();
-    let net_input_tx = input_tx.clone();
-    let player_connections = Arc::new(DashMap::new());
-
-    let identity = Identity::load_pemfiles("cert.pem", "key.pem")
-        .await
-        .expect("failed to load TLS certificate");
-
+    let identity = Identity::load_pemfiles("cert.pem", "key.pem").await?;
     let server_config = ServerConfig::builder()
         .with_bind_default(6767)
         .with_identity(identity)
@@ -192,45 +169,28 @@ async fn main() -> anyhow::Result<()> {
     let server = Endpoint::server(server_config)?;
     tracing::info!("port 6767");
 
-    let player_count = AtomicU8::new(0);
-    let connected_ips = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::with_capacity(40)));
+    let next_id = AtomicU8::new(0);
 
-    let player_connections_outer = player_connections.clone(); // clone for main scope
-    let net_players_for_task = net_players.clone();
-
-    // spawn networking task
     tokio::spawn({
-        let player_connections_task = player_connections_outer.clone(); // clone for task
+        let connections = player_connections.clone();
+        let tx = input_tx.clone();
         async move {
             loop {
-                let session_req = match server.accept().await.await {
-                    Ok(req) => req,
+                let incoming_session = match server.accept().await.await {
+                    Ok(s) => s,
                     Err(e) => {
                         tracing::error!("failed to accept session: {}", e);
                         continue;
                     }
                 };
 
-                let player_id = player_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-
-                let conn_streams = net_streams.clone();
-                let conn_players = net_players_for_task.clone();
-                let tx = net_input_tx.clone();
-                let connected_ips = connected_ips.clone();
-                let player_connections_task = player_connections_task.clone(); // clone per connection
+                let player_id = next_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let conn_map = connections.clone();
+                let game_tx = tx.clone();
 
                 tokio::spawn(async move {
-                    let _session = PlayerSession {
-                        id: player_id,
-                        connections: player_connections_task.clone(),
-                        players: conn_players.clone(),
-                        tx: tx.clone(),
-                    };
-
-                    let mut rng = WyRand::new();
-
-                    let connection = match session_req.accept().await {
-                        Ok(conn) => conn,
+                    let connection = match incoming_session.accept().await {
+                        Ok(c) => c,
                         Err(e) => {
                             tracing::error!("failed to accept connection: {}", e);
                             return;
@@ -238,289 +198,167 @@ async fn main() -> anyhow::Result<()> {
                     };
 
                     let (mut send_stream, mut recv_stream) = match connection.accept_bi().await {
-                        Ok(streams) => streams,
+                        Ok(s) => s,
                         Err(e) => {
                             tracing::error!("failed to open bidirectional stream: {}", e);
                             return;
                         }
                     };
 
-                    {
-                        let mut ips = connected_ips.lock().await;
-                        if ips.len() < ips.capacity() {
-                            ips.push(connection.remote_address().ip());
-                        } else {
-                            connection.close(VarInt::from_u32(67), b"bye buddy");
+                    let mut crypto = match perform_handshake(&mut send_stream, &mut recv_stream).await {
+                        Ok(c) => c,
+                        Err(e) => {
+                            tracing::error!("handshake failed for player {}: {}", player_id, e);
+                            let _ = connection.close(VarInt::from_u32(1), b"handshake_failed");
+                            return;
                         }
-                    }
-
-                    let mut crypto =
-                        match perform_handshake(&mut send_stream, &mut recv_stream).await {
-                            Ok(c) => c,
-                            Err(e) => {
-                                tracing::error!("handshake failed for player {}: {}", player_id, e);
-                                connection.close(VarInt::from_u32(1), b"handshake Failed");
-                                return;
-                            }
-                        };
+                    };
 
                     tracing::info!("player {} connected - session encrypted", player_id);
 
-                    let send_crypto = crypto.clone();
-                    let player_connection =
-                        crate::structs::bevy::PlayerConnection::new(send_stream, send_crypto);
+                    let _session_guard = PlayerSession {
+                        id: player_id,
+                        connections: conn_map.clone(),
+                        players: Arc::new(DashMap::new()),
+                        tx: game_tx.clone(),
+                    };
 
-                    {
-                        let mut connections_map = player_connections_task;
-                        connections_map
-                            .insert(player_id, Arc::new(AsyncMutex::new(player_connection)));
-                    }
+                    conn_map.insert(player_id, Arc::new(AsyncMutex::new(PlayerConnection::new(send_stream, crypto.clone()))));
 
-                    let mut buf = [0u8; 2048];
+                    let mut read_buf = [0u8; 4096];
 
                     loop {
-                        let ciphertext_len = match recv_stream.read(&mut buf).await {
+                        let bytes_read = match recv_stream.read(&mut read_buf).await {
+                            Ok(Some(n)) => n,
                             Ok(None) => break,
-                            Ok(Some(len)) => len,
                             Err(e) => {
                                 tracing::error!("stream read error: {}", e);
-                                return;
+                                break;
                             }
                         };
 
-                        let plaintext = match crypto.decrypt(&buf[..ciphertext_len]) {
-                            Ok(data) => data,
+                        let plaintext = match crypto.decrypt(&read_buf[..bytes_read]) {
+                            Ok(p) => p,
                             Err(_) => {
-                                tracing::warn!(
-                                    "decryption failed for player {} - possible replay attack",
-                                    player_id
-                                );
-                                connection.close(VarInt::from_u32(2), b"why ass");
-                                return;
+                                tracing::warn!("decryption failed for player {} - possible replay attack", player_id);
+                                break;
                             }
                         };
 
-                        if plaintext.is_empty() {
-                            continue;
-                        }
-
+                        if plaintext.is_empty() { continue; }
                         let opcode = plaintext[0];
+
                         match PacketType::from_u8(opcode) {
                             Some(PacketType::Spawn) => {
-                                let data = match decode::<SpawnMessage>(&plaintext[1..]) {
-                                    Ok(data) => data,
-                                    Err(_) => {
-                                        connection.close(VarInt::from_u32(67), b"why ass");
-                                        return;
-                                    }
-                                };
-
-                                let r = rng.generate::<u64>();
-                                let x = (r & 0xFFFF_FFFF) as f32 / u32::MAX as f32;
-                                let y = (r >> 32) as f32 / u32::MAX as f32;
-
-                                if tx
-                                    .send((
-                                        player_id,
-                                        InternalGameMessages::AddPlayer(Player {
-                                            name: data.name,
-                                            x,
-                                            y,
-                                            id: player_id,
-                                            move_dir: None,
-                                            vx: 0.,
-                                            vy: 0.,
-                                            attacked: false,
-                                            weapon_index: Some(0),
-                                        }),
-                                    ))
-                                    .await
-                                    .is_err()
-                                {
-                                    tracing::error!("failed to send spawn message to ECS");
+                                if let Ok(data) = decode::<SpawnMessage>(&plaintext[1..]) {
+                                    let mut rng = WyRand::new();
+                                    let _ = game_tx.send((player_id, InternalGameMessages::AddPlayer(Player {
+                                        name: data.name,
+                                        x: (rng.generate::<u32>() as f32 / u32::MAX as f32) * 500.0,
+                                        y: (rng.generate::<u32>() as f32 / u32::MAX as f32) * 500.0,
+                                        id: player_id,
+                                        move_dir: None,
+                                        vx: 0.0, vy: 0.0, attacked: false, weapon_index: Some(0),
+                                    }))).await;
                                 }
                             }
                             Some(PacketType::Move) => {
-                                let data = match decode::<MoveMessage>(&plaintext[1..]) {
-                                    Ok(data) => data,
-                                    Err(_) => {
-                                        connection.close(VarInt::from_u32(67), b"why ass");
-                                        return;
-                                    }
-                                };
-
-                                if tx
-                                    .send((
-                                        player_id,
-                                        InternalGameMessages::MovePlayer(Move { dir: data.dir }),
-                                    ))
-                                    .await
-                                    .is_err()
-                                {
-                                    tracing::error!("failed to send move message to ECS");
+                                if let Ok(data) = decode::<MoveMessage>(&plaintext[1..]) {
+                                    let _ = game_tx.send((player_id, InternalGameMessages::MovePlayer(Move { dir: data.dir }))).await;
                                 }
                             }
-
                             _ => {}
-                            None => tracing::warn!("unknown packet type: {}", opcode),
                         }
                     }
-
                     tracing::info!("player {} disconnected", player_id);
                 });
             }
         }
     });
 
-    schedule.add_systems(systems::movement_system);
+    let mut schedule = Schedule::default();
+    schedule.add_systems((systems::movement_system, systems::map_system));
 
-    let mut interval = tokio::time::interval(Duration::from_millis(67));
-
+    let mut interval = tokio::time::interval(Duration::from_millis(16));
     loop {
         interval.tick().await;
 
-        let mut world_locked = world.lock();
+        let (outbound_map, player_updates) = {
+            let mut world_locked = world.lock();
+            let bevy = &mut world_locked.bevy_world;
 
-        while let Ok((id, msg)) = input_rx.try_recv() {
-            match msg {
-                InternalGameMessages::AddPlayer(p) => {
-                    let entity = world_locked.bevy_world.spawn(p.clone()).id();
-                    let mut player_map = world_locked
-                        .bevy_world
-                        .get_resource_or_insert_with(PlayerMap::default);
-                    player_map.map.insert(id, entity);
+            while let Ok((id, msg)) = input_rx.try_recv() {
+                match msg {
+                    InternalGameMessages::AddPlayer(p) => {
+                        let entity = bevy.spawn(p.clone()).id();
+                        bevy.resource_mut::<PlayerMap>().map.insert(id, entity);
+                        
+                        let spawn_self = encode(1, ClientMessages::AddPlayer(shared::to_client::AddPlayerData { is_mine: true, data: PlayerTO::from(p.clone()) })).unwrap();
+                        let spawn_other = encode(1, ClientMessages::AddPlayer(shared::to_client::AddPlayerData { is_mine: false, data: PlayerTO::from(p.clone()) })).unwrap();
 
-                    // lol this code is so bad
-                    {
-                        println!("{:?}", p);
-                        let p_clone = p.clone();
-
-                        // broadcast as test for now
-                        for mut entry in player_connections.iter_mut() {
-                            let p_data = p_clone.clone();
-                            let id_entry = *entry.key();
-                            let conn = entry.value_mut();
-
-                            if id_entry == p_clone.id {
-                                let _ = conn
-                                    .try_lock()
-                                    .unwrap()
-                                    .send_encrypted(
-                                        encode(
-                                            1,
-                                            ClientMessages::AddPlayer(
-                                                shared::to_client::AddPlayerData {
-                                                    is_mine: true,
-                                                    data: PlayerTO::from(p_data),
-                                                },
-                                            ),
-                                        )
-                                        .unwrap()
-                                        .as_slice(),
-                                    )
-                                    .await;
-                            } else {
-                                let _ = conn
-                                    .try_lock()
-                                    .unwrap()
-                                    .send_encrypted(
-                                        encode(
-                                            1,
-                                            ClientMessages::AddPlayer(
-                                                shared::to_client::AddPlayerData {
-                                                    is_mine: false,
-                                                    data: PlayerTO::from(p_data),
-                                                },
-                                            ),
-                                        )
-                                        .unwrap()
-                                        .as_slice(),
-                                    )
-                                    .await;
-                            }
+                        for entry in player_connections.iter() {
+                            let conn = entry.value().clone();
+                            let data = if *entry.key() == id { spawn_self.clone() } else { spawn_other.clone() };
+                            tokio::spawn(async move { let _ = conn.lock().await.send_encrypted(&data).await; });
                         }
                     }
-                }
-                InternalGameMessages::MovePlayer(move_dir) => {
-                    if let Some(player_map) = world_locked.bevy_world.get_resource::<PlayerMap>() {
-                        if let Some(&entity) = player_map.map.get(&id) {
-                            if let Some(mut player) =
-                                world_locked.bevy_world.get_mut::<Player>(entity)
-                            {
-                                println!("move dir set");
-                                player.move_dir = move_dir.dir;
-                            }
+                    InternalGameMessages::MovePlayer(m) => {
+                        if let Some(&e) = bevy.resource::<PlayerMap>().map.get(&id) {
+                            if let Some(mut p) = bevy.get_mut::<Player>(e) { p.move_dir = m.dir; }
                         }
                     }
-                }
-                InternalGameMessages::Disconnect => {
-                    if let Some(player_map) = world_locked.bevy_world.get_resource::<PlayerMap>() {
-                        if let Some(&entity) = player_map.map.get(&id) {
-                            if let Some(player) = world_locked.bevy_world.get::<Player>(entity) {
-                                tracing::info!("player {} ({}) gone", player.name, id);
+                    InternalGameMessages::Disconnect => {
+                        if let Some(e) = bevy.resource_mut::<PlayerMap>().map.remove(&id) {
+                            if let Some(p) = bevy.get::<Player>(e) {
+                                tracing::info!("player {} ({}) gone", p.name, id);
                             }
-                            world_locked.bevy_world.despawn(entity);
+                            bevy.despawn(e);
                         }
                     }
                 }
             }
+
+            schedule.run(bevy);
+
+            let map_data = bevy.resource_mut::<OutboundMapQueue>().0.drain(..).collect::<Vec<_>>();
+            let updates = bevy.query::<&Player>().iter(bevy).map(|p| PlayerTO::from(p.clone())).collect::<Vec<_>>();
+            (map_data, updates)
+        };
+
+        if !player_updates.is_empty() {
+            let sync = encode(3, UpdatePlayerData { players: player_updates }).unwrap();
+            let conns = player_connections.clone();
+            tokio::spawn(async move {
+                for entry in conns.iter() {
+                    let conn = entry.value().clone();
+                    let data = sync.clone();
+                    tokio::spawn(async move { let _ = conn.lock().await.send_encrypted(&data).await; });
+                }
+            });
         }
 
-        schedule.run(&mut world_locked.bevy_world);
-
-        {
-            let mut wiped_players = Vec::new();
-
-            for player in world_locked
-                .bevy_world
-                .query::<&Player>()
-                .iter(&world_locked.bevy_world)
-            {
-                wiped_players.push(PlayerTO::from(player.clone()));
-            }
-
-            {
-                World::broadcast(
-                    encode(
-                        3,
-                        shared::to_client::UpdatePlayerData {
-                            players: wiped_players,
-                        },
-                    )
-                    .unwrap()
-                    .as_slice(),
-                    &player_connections,
-                )
-                .await;
+        for (target_id, data) in outbound_map {
+            if let Some(conn) = player_connections.get(&target_id) {
+                let conn = conn.value().clone();
+                tokio::spawn(async move { let _ = conn.lock().await.send_encrypted(&data).await; });
             }
         }
-
-        drop(world_locked);
     }
 }
 
-fn decode<T>(buf: &[u8]) -> Result<T, GameError>
-where
-    T: borsh::BorshDeserialize,
-{
-    borsh::from_slice::<T>(buf)
-        .map_err(|_| GameError::Client(errors::ClientProducedError::FaultyMessage))
+pub fn decode<T: borsh::BorshDeserialize>(buf: &[u8]) -> Result<T, GameError> {
+    borsh::from_slice::<T>(buf).map_err(|_| GameError::Client(errors::ClientProducedError::FaultyMessage))
 }
 
-fn encode<T>(opcode: u8, data: T) -> Result<Vec<u8>, GameError>
-where
-    T: borsh::BorshSerialize,
-{
+pub fn encode<T: borsh::BorshSerialize>(opcode: u8, data: T) -> Result<Vec<u8>, GameError> {
     let mut v = vec![opcode];
-    let serialized = borsh::to_vec(&data)
-        .map_err(|_| GameError::Client(errors::ClientProducedError::FaultyMessage))?;
-    v.extend(serialized);
+    v.extend(borsh::to_vec(&data).map_err(|_| GameError::Client(errors::ClientProducedError::FaultyMessage))?);
     Ok(v)
 }
 
 struct PlayerSession {
     id: u8,
-    connections: Arc<DashMap<u8, Arc<AsyncMutex<crate::structs::bevy::PlayerConnection>>>>,
+    connections: Arc<DashMap<u8, Arc<AsyncMutex<PlayerConnection>>>>,
     players: Arc<DashMap<u8, Player>>,
     tx: god::Sender<(u8, InternalGameMessages)>,
 }
@@ -528,10 +366,7 @@ struct PlayerSession {
 impl Drop for PlayerSession {
     fn drop(&mut self) {
         self.connections.remove(&self.id);
-
         self.players.remove(&self.id);
-        let _ = self
-            .tx
-            .try_send((self.id, InternalGameMessages::Disconnect));
+        let _ = self.tx.try_send((self.id, InternalGameMessages::Disconnect));
     }
 }

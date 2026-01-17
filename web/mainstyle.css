@@ -156,7 +156,7 @@ input:focus {
 }
 
 #roundTimerMenu {
-	display: none;
+	/* display: none; */
 	position: absolute;
 	left: 10px;
 	top: 10px;
@@ -222,7 +222,7 @@ input:focus {
 }
 
 .infoBack {
-	display: none;
+	/* display: none; */
 }
 
 .infoHeader {
@@ -498,6 +498,8 @@ input:focus {
 }
 
 #mainCanvas {
+    background: #4488ff;
+	
 	cursor: url("/web/20181215232039im_/https://foes.io/images/cursor.png") 17 17, default;
 	position: absolute;
 	width: 100%;
@@ -585,7 +587,7 @@ input:focus {
 }
 
 #sharedUI {
-	display: none;
+	/* display: none; */
 }
 
 #minimap {
@@ -609,7 +611,7 @@ input:focus {
 }
 
 #voiceDisplay {
-	display: none;
+	/* display: none; */
 	position: absolute;
 	top: 20px;
 	left: 150px;
@@ -617,7 +619,7 @@ input:focus {
 
 #infoDisplay {
 	text-align: left;
-	display: none;
+	/* display: none; */
 	padding: 10px;
 	background-color: rgba(0, 0, 0, 0.2);
 	position: absolute;
