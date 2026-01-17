@@ -1,18 +1,21 @@
+use bevy_ecs::prelude::*;
+
+use crate::structs::components::{PlayerEntity, Position, Velocity};
+use shared::structs::server::Player;
+
 const PLAYER_MAX_SPEED: f32 = 45.0;
 const PLAYER_ACCEL: f32 = 120.0;
 const PLAYER_FRICTION: f32 = 90.0;
-
 const DT: f32 = 0.45;
 
-use bevy_ecs::prelude::*;
-use shared::structs::server::Player;
-
-pub fn movement_system(mut query: Query<&mut Player>) {
+pub fn movement_system(
+    mut query: Query<(&mut Position, &mut Velocity, &Player), With<PlayerEntity>>,
+) {
     let dt = DT;
 
-    for mut player in query.iter_mut() {
-        let mut vx = player.vx;
-        let mut vy = player.vy;
+    for (mut pos, mut vel, player) in query.iter_mut() {
+        let mut vx = vel.vx;
+        let mut vy = vel.vy;
 
         if let Some(dir) = player.move_dir {
             let target_vx = dir.cos() * PLAYER_MAX_SPEED;
@@ -33,7 +36,6 @@ pub fn movement_system(mut query: Query<&mut Player>) {
             }
         } else {
             // friction when no input
-            // sqrt BAD (maybe not)
             let speed = (vx * vx + vy * vy).sqrt();
             let drop = PLAYER_FRICTION * dt;
 
@@ -46,12 +48,10 @@ pub fn movement_system(mut query: Query<&mut Player>) {
             }
         }
 
-        player.vx = vx;
-        player.vy = vy;
-        player.x += vx * dt;
-        player.y += vy * dt;
+        vel.vx = vx;
+        vel.vy = vy;
 
-        // player.x = player.x.clamp(0.0, 8192.0);
-        // player.y = player.y.clamp(0.0, 8192.0);
+        pos.x += vx * dt;
+        pos.y += vy * dt;
     }
 }

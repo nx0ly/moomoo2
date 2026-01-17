@@ -49,22 +49,3 @@ pub struct AddPlayerData {
 pub struct UpdatePlayerData {
     pub players: Vec<PlayerTO>
 }
-
-#[derive(Debug, Clone, BorshDeserialize, BorshSerialize, PartialEq)]
-#[borsh(use_discriminant = true)]
-#[cfg_attr(feature = "web", derive(Serialize, Deserialize))]
-pub enum TileType {
-    Ocean = 0,
-    Sand = 1,
-    Grass = 2,
-    ShallowOcean = 3,
-}
-
-
-#[derive(Debug, Clone, BorshDeserialize, BorshSerialize, PartialEq)]
-#[cfg_attr(feature = "web", derive(Serialize, Deserialize))]
-pub struct MapChunkData {
-    pub c_x: i32,
-    pub c_y: i32,
-    pub tiles: Vec<TileType>
-}

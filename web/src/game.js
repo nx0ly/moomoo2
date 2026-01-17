@@ -238,6 +238,7 @@ export class Game {
 
       case 3:
         let { players } = packet.data;
+        console.log(players)
         for (let player of players) {
           let p = game.utils.findPlayerByID(player.id) || {};
 
@@ -251,13 +252,6 @@ export class Game {
         }
 
         break;
-
-      case 4: 
-        console.log(packet);
-        const { c_x, c_y, tiles } = packet.data;
-        console.log(c_x, c_y, tiles)
-        this.renderer.upsertChunk(c_x, c_y, tiles);
-      break;
 
       default:
         console.warn("unknown packet type:", packet.code);

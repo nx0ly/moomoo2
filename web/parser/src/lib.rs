@@ -1,5 +1,5 @@
 use serde::Serialize;
-use shared::to_client::{AddPlayerData, ClientMessages, MapChunkData, UpdatePlayerData};
+use shared::to_client::{AddPlayerData, ClientMessages, UpdatePlayerData};
 use shared::{
     PacketType,
     structs::client::{JsMove, JsPlayer},
@@ -19,6 +19,9 @@ use pqc_kyber::{
 };
 use sha2::Sha256;
 use x25519_dalek::{PublicKey, StaticSecret};
+
+// TODO: remove dependency on serde_wasm_bindgen
+// its kinda slow
 
 #[derive(BorshSerialize, BorshDeserialize)]
 struct ClientHello {
@@ -61,7 +64,10 @@ impl SessionCrypto {
     pub fn decrypt(&mut self, ciphertext: &[u8]) -> Result<Vec<u8>, JsValue> {
         let nonce = Self::make_nonce(self.recv_nonce);
 
-        let plaintext = self.cipher.decrypt(&nonce, ciphertext).map_err(|e| JsValue::from_str(&format!("decryption failed: {}", e)));
+        let plaintext = self
+            .cipher
+            .decrypt(&nonce, ciphertext)
+            .map_err(|e| JsValue::from_str(&format!("decryption failed: {}", e)));
 
         self.recv_nonce = self.recv_nonce.wrapping_add(1);
         plaintext
@@ -226,21 +232,14 @@ pub fn decode_bytes(bytes: &[u8]) -> Result<JsValue, JsValue> {
                     .map_err(|e| JsValue::from_str(&e.to_string()))?)
             }
             Some(PacketType::UpdatePlayers) => {
-                let data = borsh::from_slice::<UpdatePlayerData>(&bytes[1..]).map_err(|e| JsValue::from_str(&format!("error decoding updateplayers {}", e)))?;
-                let packet = DecodedPacket {code: *code, data};
+                let data = borsh::from_slice::<UpdatePlayerData>(&bytes[1..]).map_err(|e| {
+                    JsValue::from_str(&format!("error decoding updateplayers {}", e))
+                })?;
+                let packet = DecodedPacket { code: *code, data };
 
-                                Ok(serde_wasm_bindgen::to_value(&packet)
+                Ok(serde_wasm_bindgen::to_value(&packet)
                     .map_err(|e| JsValue::from_str(&e.to_string()))?)
-
             }
-            Some(PacketType::MapData) => {
-            let data = borsh::from_slice::<MapChunkData>(&bytes[1..])
-                .map_err(|e| JsValue::from_str(&format!("error decoding map chunk {}", e)))?;
-            let packet = DecodedPacket { code: *code, data };
-
-            Ok(serde_wasm_bindgen::to_value(&packet)
-                .map_err(|e| JsValue::from_str(&e.to_string()))?)
-        }
             None => Err(JsValue::from_str("unknown opcode")),
         },
         None => Err(JsValue::from_str("no opcode found")),

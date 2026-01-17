@@ -15,10 +15,10 @@ use x25519_dalek::{EphemeralSecret, PublicKey};
 use bevy_ecs::prelude::*;
 use dashmap::DashMap;
 use parking_lot::Mutex;
-use shared::PacketType;
 use shared::structs::server::{Move, Player};
 use shared::to_client::{ClientMessages, PlayerTO, UpdatePlayerData};
 use shared::to_server::{MoveMessage, SpawnMessage};
+use shared::PacketType;
 use tokio::sync::mpsc as god;
 use tokio::sync::Mutex as AsyncMutex;
 use wtransport::*;
@@ -31,8 +31,10 @@ use nanorand::{Rng, WyRand};
 use crate::{
     config::config::load_config,
     errors::{GameError, InternalGameMessages},
-    structs::bevy::{PlayerMap, World, PlayerConnection},
-    systems::{ChunkStaging, OutboundMapQueue, PendingGen, WorldMap},
+    structs::{
+        bevy::{IDToConnection, PlayerConnection, PlayerMap, World},
+        components::{spawn_wall, Position},
+    },
 };
 
 mod config;
@@ -55,19 +57,19 @@ struct ServerHello {
 }
 
 #[derive(Clone)]
-struct SessionCrypto {
-    cipher: ChaCha20Poly1305,
-    recv_nonce: u64,
-    send_nonce: u64,
+pub struct SessionCrypto {
+    cipher: Arc<ChaCha20Poly1305>,
+    recv_nonce: Arc<Mutex<u64>>,
+    send_nonce: Arc<Mutex<u64>>,
 }
 
 impl SessionCrypto {
     fn new(key: [u8; 32]) -> Self {
         let key = Key::from_slice(&key);
         Self {
-            cipher: ChaCha20Poly1305::new(key),
-            recv_nonce: 0,
-            send_nonce: 0,
+            cipher: Arc::new(ChaCha20Poly1305::new(key)),
+            recv_nonce: Arc::new(Mutex::new(0)),
+            send_nonce: Arc::new(Mutex::new(0)),
         }
     }
 
@@ -77,17 +79,24 @@ impl SessionCrypto {
         *Nonce::from_slice(&bytes)
     }
 
-    fn decrypt(&mut self, ciphertext: &[u8]) -> Result<Vec<u8>, chacha20poly1305::Error> {
-        let nonce = Self::make_nonce(self.recv_nonce);
+    pub fn decrypt(&self, ciphertext: &[u8]) -> Result<Vec<u8>, chacha20poly1305::Error> {
+        let mut nonce_counter = self.recv_nonce.lock();
+        let nonce = Self::make_nonce(*nonce_counter);
         let plaintext = self.cipher.decrypt(&nonce, ciphertext)?;
-        self.recv_nonce = self.recv_nonce.wrapping_add(1);
+        *nonce_counter = nonce_counter.wrapping_add(1);
         Ok(plaintext)
     }
 
-    fn encrypt(&mut self, plaintext: &[u8]) -> Result<Vec<u8>, chacha20poly1305::Error> {
-        let nonce = Self::make_nonce(self.send_nonce);
-        self.send_nonce = self.send_nonce.wrapping_add(1);
-        self.cipher.encrypt(&nonce, plaintext)
+    pub fn encrypt(&self, plaintext: &[u8]) -> Result<Vec<u8>, chacha20poly1305::Error> {
+        let mut nonce_counter = self.send_nonce.lock();
+        let nonce = Self::make_nonce(*nonce_counter);
+        let ciphertext = self.cipher.encrypt(&nonce, plaintext)?;
+        *nonce_counter = nonce_counter.wrapping_add(1);
+        Ok(ciphertext)
+    }
+
+    pub fn nonce_state(&self) -> (u64, u64) {
+        (*self.recv_nonce.lock(), *self.send_nonce.lock())
     }
 }
 
@@ -133,7 +142,7 @@ async fn perform_handshake(
     let response_bytes = borsh::to_vec(&server_hello)?;
     send.write_all(&response_bytes).await?;
 
-    tracing::info!("jaja working im such a GOD");
+    tracing::info!("handshake complete - session encrypted");
 
     Ok(SessionCrypto::new(session_key))
 }
@@ -149,15 +158,40 @@ async fn main() -> anyhow::Result<()> {
     }));
 
     {
+        use crate::structs::components::Position;
+        use crate::systems::{Collider, NonReactiveCollider};
+
         let mut w = world.lock();
-        w.bevy_world.insert_resource(WorldMap { seed: 12345, ..Default::default() });
-        w.bevy_world.insert_resource(ChunkStaging::default());
-        w.bevy_world.insert_resource(PendingGen::default());
-        w.bevy_world.insert_resource(OutboundMapQueue::default());
         w.bevy_world.insert_resource(PlayerMap::default());
+
+        // initialize wall boundary colliders
+
+        w.bevy_world.spawn((
+            Position { x: 4096., y: 0. },
+            Collider::rect(4096., 10.),
+            NonReactiveCollider,
+        ));
+
+        w.bevy_world.spawn((
+            Position { x: 4096., y: 8192. },
+            Collider::rect(4096., 10.),
+            NonReactiveCollider,
+        ));
+
+        w.bevy_world.spawn((
+            Position { x: 0., y: 4096. },
+            Collider::rect(10., 4096.),
+            NonReactiveCollider,
+        ));
+
+        w.bevy_world.spawn((
+            Position { x: 8192., y: 4196. },
+            Collider::rect(10., 4196.),
+            NonReactiveCollider,
+        ));
     }
 
-    let player_connections: Arc<DashMap<u8, Arc<AsyncMutex<PlayerConnection>>>> = Arc::new(DashMap::new());
+    let player_connections: IDToConnection = Arc::new(DashMap::new());
     let (input_tx, mut input_rx) = god::channel::<(u8, InternalGameMessages)>(1024);
 
     let identity = Identity::load_pemfiles("cert.pem", "key.pem").await?;
@@ -167,7 +201,7 @@ async fn main() -> anyhow::Result<()> {
         .build();
 
     let server = Endpoint::server(server_config)?;
-    tracing::info!("port 6767");
+    tracing::info!("server listening on port 6767");
 
     let next_id = AtomicU8::new(0);
 
@@ -205,7 +239,7 @@ async fn main() -> anyhow::Result<()> {
                         }
                     };
 
-                    let mut crypto = match perform_handshake(&mut send_stream, &mut recv_stream).await {
+                    let crypto = match perform_handshake(&mut send_stream, &mut recv_stream).await {
                         Ok(c) => c,
                         Err(e) => {
                             tracing::error!("handshake failed for player {}: {}", player_id, e);
@@ -223,48 +257,87 @@ async fn main() -> anyhow::Result<()> {
                         tx: game_tx.clone(),
                     };
 
-                    conn_map.insert(player_id, Arc::new(AsyncMutex::new(PlayerConnection::new(send_stream, crypto.clone()))));
+                    conn_map.insert(
+                        player_id,
+                        Arc::new(AsyncMutex::new(PlayerConnection::new(
+                            send_stream,
+                            crypto.clone(),
+                        ))),
+                    );
 
                     let mut read_buf = [0u8; 4096];
 
                     loop {
                         let bytes_read = match recv_stream.read(&mut read_buf).await {
                             Ok(Some(n)) => n,
-                            Ok(None) => break,
+                            Ok(None) => {
+                                tracing::info!("player {} stream closed normally", player_id);
+                                break;
+                            }
                             Err(e) => {
-                                tracing::error!("stream read error: {}", e);
+                                tracing::error!(
+                                    "stream read error for player {}: {:?}",
+                                    player_id,
+                                    e
+                                );
                                 break;
                             }
                         };
 
+                        if bytes_read == 0 {
+                            continue;
+                        }
                         let plaintext = match crypto.decrypt(&read_buf[..bytes_read]) {
                             Ok(p) => p,
-                            Err(_) => {
-                                tracing::warn!("decryption failed for player {} - possible replay attack", player_id);
+                            Err(e) => {
+                                let (recv, send) = crypto.nonce_state();
+                                tracing::error!(
+                                    "decryption failed for player {} - recv_nonce: {}, send_nonce: {}, packet_len: {}, error: {:?}", 
+                                    player_id, recv, send, bytes_read, e
+                                );
                                 break;
                             }
                         };
 
-                        if plaintext.is_empty() { continue; }
+                        if plaintext.is_empty() {
+                            continue;
+                        }
                         let opcode = plaintext[0];
 
                         match PacketType::from_u8(opcode) {
                             Some(PacketType::Spawn) => {
                                 if let Ok(data) = decode::<SpawnMessage>(&plaintext[1..]) {
                                     let mut rng = WyRand::new();
-                                    let _ = game_tx.send((player_id, InternalGameMessages::AddPlayer(Player {
-                                        name: data.name,
-                                        x: (rng.generate::<u32>() as f32 / u32::MAX as f32) * 500.0,
-                                        y: (rng.generate::<u32>() as f32 / u32::MAX as f32) * 500.0,
-                                        id: player_id,
-                                        move_dir: None,
-                                        vx: 0.0, vy: 0.0, attacked: false, weapon_index: Some(0),
-                                    }))).await;
+                                    let _ = game_tx
+                                        .send((
+                                            player_id,
+                                            InternalGameMessages::AddPlayer(Player {
+                                                name: data.name,
+                                                x: (rng.generate::<u32>() as f32 / u32::MAX as f32)
+                                                    * 500.0,
+                                                y: (rng.generate::<u32>() as f32 / u32::MAX as f32)
+                                                    * 500.0,
+                                                id: player_id,
+                                                move_dir: None,
+                                                vx: 0.0,
+                                                vy: 0.0,
+                                                attacked: false,
+                                                weapon_index: Some(0),
+                                            }),
+                                        ))
+                                        .await;
                                 }
                             }
                             Some(PacketType::Move) => {
                                 if let Ok(data) = decode::<MoveMessage>(&plaintext[1..]) {
-                                    let _ = game_tx.send((player_id, InternalGameMessages::MovePlayer(Move { dir: data.dir }))).await;
+                                    let _ = game_tx
+                                        .send((
+                                            player_id,
+                                            InternalGameMessages::MovePlayer(Move {
+                                                dir: data.dir,
+                                            }),
+                                        ))
+                                        .await;
                                 }
                             }
                             _ => {}
@@ -277,88 +350,130 @@ async fn main() -> anyhow::Result<()> {
     });
 
     let mut schedule = Schedule::default();
-    schedule.add_systems((systems::movement_system, systems::map_system));
+    schedule.add_systems((
+        systems::movement_system,
+        systems::collision_resolution_system,
+    ));
 
-    let mut interval = tokio::time::interval(Duration::from_millis(16));
+    let mut interval = tokio::time::interval(Duration::from_millis(67));
     loop {
         interval.tick().await;
 
-        let (outbound_map, player_updates) = {
-            let mut world_locked = world.lock();
-            let bevy = &mut world_locked.bevy_world;
+        let mut world_locked = world.lock();
+        let bevy = &mut world_locked.bevy_world;
 
-            while let Ok((id, msg)) = input_rx.try_recv() {
-                match msg {
-                    InternalGameMessages::AddPlayer(p) => {
-                        let entity = bevy.spawn(p.clone()).id();
-                        bevy.resource_mut::<PlayerMap>().map.insert(id, entity);
-                        
-                        let spawn_self = encode(1, ClientMessages::AddPlayer(shared::to_client::AddPlayerData { is_mine: true, data: PlayerTO::from(p.clone()) })).unwrap();
-                        let spawn_other = encode(1, ClientMessages::AddPlayer(shared::to_client::AddPlayerData { is_mine: false, data: PlayerTO::from(p.clone()) })).unwrap();
-
-                        for entry in player_connections.iter() {
-                            let conn = entry.value().clone();
-                            let data = if *entry.key() == id { spawn_self.clone() } else { spawn_other.clone() };
-                            tokio::spawn(async move { let _ = conn.lock().await.send_encrypted(&data).await; });
+        while let Ok((id, msg)) = input_rx.try_recv() {
+            match msg {
+                InternalGameMessages::AddPlayer(p) => {
+                    let player_map = bevy.resource::<PlayerMap>();
+                    for (_, &entity) in player_map.map.iter() {
+                        if let Some(existing_player) = bevy.get::<Player>(entity) {
+                            let existing_spawn = encode(
+                                1,
+                                ClientMessages::AddPlayer(shared::to_client::AddPlayerData {
+                                    is_mine: false,
+                                    data: PlayerTO::from(existing_player.clone()),
+                                }),
+                            )
+                            .unwrap();
+                            World::send_to(id, &existing_spawn, &player_connections).await;
                         }
                     }
-                    InternalGameMessages::MovePlayer(m) => {
-                        if let Some(&e) = bevy.resource::<PlayerMap>().map.get(&id) {
-                            if let Some(mut p) = bevy.get_mut::<Player>(e) { p.move_dir = m.dir; }
+
+                    use crate::structs::components::{PlayerEntity, Position, Velocity};
+                    use crate::systems::{Collider, ReactiveCollider};
+                    let entity = bevy
+                        .spawn((
+                            Position { x: p.x, y: p.y },
+                            Velocity { vx: 0.0, vy: 0.0 },
+                            p.clone(),
+                            PlayerEntity,
+                            Collider::circle(35.0),
+                            ReactiveCollider,
+                        ))
+                        .id();
+                    bevy.resource_mut::<PlayerMap>().map.insert(id, entity);
+
+                    let spawn_self = encode(
+                        1,
+                        ClientMessages::AddPlayer(shared::to_client::AddPlayerData {
+                            is_mine: true,
+                            data: PlayerTO::from(p.clone()),
+                        }),
+                    )
+                    .unwrap();
+                    World::send_to(id, &spawn_self, &player_connections).await;
+
+                    let spawn_other = encode(
+                        1,
+                        ClientMessages::AddPlayer(shared::to_client::AddPlayerData {
+                            is_mine: false,
+                            data: PlayerTO::from(p.clone()),
+                        }),
+                    )
+                    .unwrap();
+                    World::broadcast_with_exceptions(&[id], &spawn_other, &player_connections)
+                        .await;
+                }
+                InternalGameMessages::MovePlayer(m) => {
+                    if let Some(&e) = bevy.resource::<PlayerMap>().map.get(&id) {
+                        if let Some(mut p) = bevy.get_mut::<Player>(e) {
+                            p.move_dir = m.dir;
                         }
                     }
-                    InternalGameMessages::Disconnect => {
-                        if let Some(e) = bevy.resource_mut::<PlayerMap>().map.remove(&id) {
-                            if let Some(p) = bevy.get::<Player>(e) {
-                                tracing::info!("player {} ({}) gone", p.name, id);
-                            }
-                            bevy.despawn(e);
+                }
+                InternalGameMessages::Disconnect => {
+                    if let Some(e) = bevy.resource_mut::<PlayerMap>().map.remove(&id) {
+                        if let Some(p) = bevy.get::<Player>(e) {
+                            tracing::info!("player {} ({}) gone", p.name, id);
                         }
+                        bevy.despawn(e);
                     }
                 }
             }
-
-            schedule.run(bevy);
-
-            let map_data = bevy.resource_mut::<OutboundMapQueue>().0.drain(..).collect::<Vec<_>>();
-            let updates = bevy.query::<&Player>().iter(bevy).map(|p| PlayerTO::from(p.clone())).collect::<Vec<_>>();
-            (map_data, updates)
-        };
-
-        if !player_updates.is_empty() {
-            let sync = encode(3, UpdatePlayerData { players: player_updates }).unwrap();
-            let conns = player_connections.clone();
-            tokio::spawn(async move {
-                for entry in conns.iter() {
-                    let conn = entry.value().clone();
-                    let data = sync.clone();
-                    tokio::spawn(async move { let _ = conn.lock().await.send_encrypted(&data).await; });
-                }
-            });
         }
 
-        for (target_id, data) in outbound_map {
-            if let Some(conn) = player_connections.get(&target_id) {
-                let conn = conn.value().clone();
-                tokio::spawn(async move { let _ = conn.lock().await.send_encrypted(&data).await; });
+        schedule.run(bevy);
+
+        let player_map = bevy.resource::<PlayerMap>();
+        let mut updates = Vec::new();
+
+        for (_, &entity) in player_map.map.iter() {
+            if let (Some(player), Some(pos)) =
+                (bevy.get::<Player>(entity), bevy.get::<Position>(entity))
+            {
+                let mut p = player.clone();
+                p.x = pos.x;
+                p.y = pos.y;
+
+                updates.push(PlayerTO::from(p));
             }
+        }
+
+        if !updates.is_empty() {
+            let update_msg = encode(3, UpdatePlayerData { players: updates }).unwrap();
+            World::broadcast(&update_msg, &player_connections).await;
         }
     }
 }
 
 pub fn decode<T: borsh::BorshDeserialize>(buf: &[u8]) -> Result<T, GameError> {
-    borsh::from_slice::<T>(buf).map_err(|_| GameError::Client(errors::ClientProducedError::FaultyMessage))
+    borsh::from_slice::<T>(buf)
+        .map_err(|_| GameError::Client(errors::ClientProducedError::FaultyMessage))
 }
 
 pub fn encode<T: borsh::BorshSerialize>(opcode: u8, data: T) -> Result<Vec<u8>, GameError> {
     let mut v = vec![opcode];
-    v.extend(borsh::to_vec(&data).map_err(|_| GameError::Client(errors::ClientProducedError::FaultyMessage))?);
+    v.extend(
+        borsh::to_vec(&data)
+            .map_err(|_| GameError::Client(errors::ClientProducedError::FaultyMessage))?,
+    );
     Ok(v)
 }
 
 struct PlayerSession {
     id: u8,
-    connections: Arc<DashMap<u8, Arc<AsyncMutex<PlayerConnection>>>>,
+    connections: IDToConnection,
     players: Arc<DashMap<u8, Player>>,
     tx: god::Sender<(u8, InternalGameMessages)>,
 }
@@ -367,6 +482,8 @@ impl Drop for PlayerSession {
     fn drop(&mut self) {
         self.connections.remove(&self.id);
         self.players.remove(&self.id);
-        let _ = self.tx.try_send((self.id, InternalGameMessages::Disconnect));
+        let _ = self
+            .tx
+            .try_send((self.id, InternalGameMessages::Disconnect));
     }
 }
