@@ -5,6 +5,7 @@
     "": {
       "name": "web",
       "dependencies": {
+        "@pixi/tilemap": "^5.0.2",
         "esbuild": "^0.27.2",
         "pixi.js": "^8.14.3",
         "vite-plugin-checker": "^0.12.0",
@@ -100,6 +101,8 @@
     "@oxc-project/types": ["@oxc-project/types@0.97.0", "", {}, "sha512-lxmZK4xFrdvU0yZiDwgVQTCvh2gHWBJCBk5ALsrtsBWhs0uDIi+FTOnXRQeQfs304imdvTdaakT/lqwQ8hkOXQ=="],
 
     "@pixi/colord": ["@pixi/colord@2.9.6", "", {}, "sha512-nezytU2pw587fQstUu1AsJZDVEynjskwOL+kibwcdxsMBFqPsFFNA7xl0ii/gXuDi6M0xj3mfRJj8pBSc2jCfA=="],
+
+    "@pixi/tilemap": ["@pixi/tilemap@5.0.2", "", { "peerDependencies": { "pixi.js": ">=8.5.0" } }, "sha512-J+K1eU7uB58WPVD33d7usXrhKA03IGq3IfPvXBFr1027Bb9ScxrGhH0NomR9VpVVUPiHkK7FcTGuOtJMVGAv6A=="],
 
     "@rolldown/binding-android-arm64": ["@rolldown/binding-android-arm64@1.0.0-beta.50", "", { "os": "android", "cpu": "arm64" }, "sha512-XlEkrOIHLyGT3avOgzfTFSjG+f+dZMw+/qd+Y3HLN86wlndrB/gSimrJCk4gOhr1XtRtEKfszpadI3Md4Z4/Ag=="],
 

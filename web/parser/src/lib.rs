@@ -40,6 +40,21 @@ pub struct SessionCrypto {
 }
 
 #[wasm_bindgen]
+pub struct DecodedMapChunk {
+    pub cx: i32,
+    pub cy: i32,
+    tiles: Vec<u8>,
+}
+
+#[wasm_bindgen]
+impl DecodedMapChunk {
+    #[wasm_bindgen(getter)]
+    pub fn tiles(&self) -> Box<[u8]> {
+        self.tiles.clone().into_boxed_slice()
+    }
+}
+
+#[wasm_bindgen]
 impl SessionCrypto {
     fn make_nonce(counter: u64) -> Nonce {
         let mut bytes = [0u8; 12];
@@ -61,13 +76,15 @@ impl SessionCrypto {
     pub fn decrypt(&mut self, ciphertext: &[u8]) -> Result<Vec<u8>, JsValue> {
         let nonce = Self::make_nonce(self.recv_nonce);
 
-        let plaintext = self.cipher.decrypt(&nonce, ciphertext).map_err(|e| JsValue::from_str(&format!("decryption failed: {}", e)));
+        let plaintext = self
+            .cipher
+            .decrypt(&nonce, ciphertext)
+            .map_err(|e| JsValue::from_str(&format!("decryption failed: {}", e)))?;
 
         self.recv_nonce = self.recv_nonce.wrapping_add(1);
-        plaintext
+        Ok(plaintext)
     }
 
-    // debug stuff
     #[wasm_bindgen]
     pub fn get_send_nonce(&self) -> u64 {
         self.send_nonce
@@ -142,17 +159,20 @@ impl HandshakeState {
             .map_err(|_| JsValue::from_str("invalid x25519 secret key length"))?;
         let x25519_secret = StaticSecret::from(x25519_secret_bytes);
 
-        // x25519 ecdh
+        // Perform X25519 ECDH
         let server_x25519_pk = PublicKey::from(server_hello.x25519_pk);
         let x25519_shared = x25519_secret.diffie_hellman(&server_x25519_pk);
 
+        // Decapsulate Kyber shared secret
         let kyber_shared = decapsulate(&server_hello.kyber_ct, &self.kyber_secret)
             .map_err(|e| JsValue::from_str(&format!("kyber decapsulation failed: {:?}", e)))?;
 
+        // Combine both shared secrets
         let mut combined_secret = Vec::with_capacity(32 + kyber_shared.len());
         combined_secret.extend_from_slice(x25519_shared.as_bytes());
         combined_secret.extend_from_slice(&kyber_shared);
 
+        // Derive session key using HKDF
         let hkdf = Hkdf::<Sha256>::new(None, &combined_secret);
         let mut session_key = [0u8; 32];
         hkdf.expand(b"mumu", &mut session_key)
@@ -197,53 +217,50 @@ struct DecodedPacket<T> {
 #[wasm_bindgen]
 pub fn decode_bytes(bytes: &[u8]) -> Result<JsValue, JsValue> {
     if bytes.is_empty() {
-        return Err(JsValue::from_str("empty"));
+        return Err(JsValue::from_str("empty packet"));
     }
 
-    let opcode = bytes.first();
+    let opcode = bytes[0];
 
-    match opcode {
-        Some(code) => match PacketType::from_u8(*code) {
-            Some(PacketType::Spawn) => {
-                let data = borsh::from_slice::<ClientMessages>(&bytes[1..])
-                    .map_err(|e| JsValue::from_str(&format!("error decoding player {}", e)))?;
+    match PacketType::from_u8(opcode) {
+        Some(PacketType::Spawn) => {
+            let data = borsh::from_slice::<ClientMessages>(&bytes[1..])
+                .map_err(|e| JsValue::from_str(&format!("error decoding spawn packet: {}", e)))?;
 
-                let data = match data {
-                    ClientMessages::AddPlayer(d) => d,
-                };
+            let data = match data {
+                ClientMessages::AddPlayer(d) => d,
+            };
 
-                let packet = DecodedPacket { code: *code, data };
+            let packet = DecodedPacket { code: opcode, data };
 
-                Ok(serde_wasm_bindgen::to_value(&packet)
-                    .map_err(|e| JsValue::from_str(&e.to_string()))?)
-            }
-            Some(PacketType::Move) => {
-                let data = borsh::from_slice::<Move>(&bytes[1..])
-                    .map_err(|e| JsValue::from_str(&format!("error decoding move {}", e)))?;
-                let packet = DecodedPacket { code: *code, data };
-
-                Ok(serde_wasm_bindgen::to_value(&packet)
-                    .map_err(|e| JsValue::from_str(&e.to_string()))?)
-            }
-            Some(PacketType::UpdatePlayers) => {
-                let data = borsh::from_slice::<UpdatePlayerData>(&bytes[1..]).map_err(|e| JsValue::from_str(&format!("error decoding updateplayers {}", e)))?;
-                let packet = DecodedPacket {code: *code, data};
-
-                                Ok(serde_wasm_bindgen::to_value(&packet)
-                    .map_err(|e| JsValue::from_str(&e.to_string()))?)
-
-            }
-            Some(PacketType::MapData) => {
-            let data = borsh::from_slice::<MapChunkData>(&bytes[1..])
-                .map_err(|e| JsValue::from_str(&format!("error decoding map chunk {}", e)))?;
-            let packet = DecodedPacket { code: *code, data };
-
-            Ok(serde_wasm_bindgen::to_value(&packet)
-                .map_err(|e| JsValue::from_str(&e.to_string()))?)
+            serde_wasm_bindgen::to_value(&packet)
+                .map_err(|e| JsValue::from_str(&e.to_string()))
         }
-            None => Err(JsValue::from_str("unknown opcode")),
-        },
-        None => Err(JsValue::from_str("no opcode found")),
+        Some(PacketType::Move) => {
+            let data = borsh::from_slice::<Move>(&bytes[1..])
+                .map_err(|e| JsValue::from_str(&format!("error decoding move packet: {}", e)))?;
+            let packet = DecodedPacket { code: opcode, data };
+
+            serde_wasm_bindgen::to_value(&packet)
+                .map_err(|e| JsValue::from_str(&e.to_string()))
+        }
+        Some(PacketType::UpdatePlayers) => {
+            let data = borsh::from_slice::<UpdatePlayerData>(&bytes[1..])
+                .map_err(|e| JsValue::from_str(&format!("error decoding update players packet: {}", e)))?;
+            let packet = DecodedPacket { code: opcode, data };
+
+            serde_wasm_bindgen::to_value(&packet)
+                .map_err(|e| JsValue::from_str(&e.to_string()))
+        }
+        Some(PacketType::MapData) => {
+            let data = borsh::from_slice::<MapChunkData>(&bytes[1..])
+                .map_err(|e| JsValue::from_str(&format!("error decoding map chunk: {}", e)))?;
+            let packet = DecodedPacket { code: opcode, data };
+
+            serde_wasm_bindgen::to_value(&packet)
+                .map_err(|e| JsValue::from_str(&e.to_string()))
+        }
+        None => Err(JsValue::from_str(&format!("unknown opcode: {}", opcode))),
     }
 }
 
@@ -255,21 +272,16 @@ pub fn encode_into_bytes(packet: JsValue, opcode: u8) -> Result<Box<[u8]>, JsVal
         1 => {
             let spawn: SpawnMessage = serde_wasm_bindgen::from_value(packet)
                 .map_err(|x| JsValue::from_str(&x.to_string()))?;
-            if let Err(e) = borsh::to_writer(&mut buf, &spawn) {
-                return Err(JsValue::from_str(&format!(
-                    "error encoding spawn msg {}",
-                    e
-                )));
-            }
+            borsh::to_writer(&mut buf, &spawn)
+                .map_err(|e| JsValue::from_str(&format!("error encoding spawn message: {}", e)))?;
         }
         2 => {
             let js_move: JsMove = serde_wasm_bindgen::from_value(packet)
                 .map_err(|x| JsValue::from_str(&x.to_string()))?;
-            if let Err(e) = borsh::to_writer(&mut buf, &js_move) {
-                return Err(JsValue::from_str(&format!("error encoding move {}", e)));
-            }
+            borsh::to_writer(&mut buf, &js_move)
+                .map_err(|e| JsValue::from_str(&format!("error encoding move: {}", e)))?;
         }
-        _ => return Err(JsValue::from_str("unknown opcode")),
+        _ => return Err(JsValue::from_str(&format!("unknown opcode: {}", opcode))),
     }
 
     Ok(buf.into_boxed_slice())

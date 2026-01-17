@@ -50,8 +50,9 @@ pub struct UpdatePlayerData {
     pub players: Vec<PlayerTO>
 }
 
-#[derive(Debug, Clone, BorshDeserialize, BorshSerialize, PartialEq)]
+#[derive(Debug, Clone, Copy, BorshDeserialize, BorshSerialize, PartialEq)]
 #[borsh(use_discriminant = true)]
+#[repr(u8)]
 #[cfg_attr(feature = "web", derive(Serialize, Deserialize))]
 pub enum TileType {
     Ocean = 0,

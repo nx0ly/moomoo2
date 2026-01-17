@@ -7,9 +7,9 @@ use shared::{
 };
 use std::sync::Arc;
 
-pub const CHUNK_SIZE: i32 = 16;
-pub const TILE_SIZE: f32 = 6.;
-const LOAD_DISTANCE: i32 = 10; // chunk wise
+pub const CHUNK_SIZE: i32 = 32;
+pub const TILE_SIZE: f32 = 24.;
+const LOAD_DISTANCE: i32 = 12; // chunk wise
 
 #[derive(Resource, Default)]
 pub struct WorldMap {
@@ -70,7 +70,10 @@ pub fn map_system(
                 }
 
                 if let Some(tiles) = map.chunks.get(&key) {
-                    let data = MapChunkData { c_x: x, c_y: y, tiles: tiles.value().clone() };
+                    // let low_res = downsample_tiles(tiles.value(), CHUNK_SIZE, 4, 8);
+                    // let data = MapChunkData { c_x: x, c_y: y, tiles: low_res };
+
+                    let data = MapChunkData { c_x: x, c_y: y, tiles: tiles.value().to_vec() };
                     if let Ok(encoded) = crate::encode(4, data) {
                         queue.0.push((player.id, encoded));
                         tracker.sent_chunks.insert(key);
@@ -130,4 +133,27 @@ fn generate_chunk(chunk_x: i32, chunk_y: i32, noise: &Simplex) -> Vec<TileType> 
     }
 
     tiles
+}
+
+
+fn downsample_tiles(
+    tiles: &[TileType],
+    src_size: i32,
+    target_w: i32,
+    target_h: i32,
+) -> Vec<TileType> {
+    let step_x = src_size / target_w;
+    let step_y = src_size / target_h;
+
+    let mut out = Vec::with_capacity((target_w * target_h) as usize);
+
+    for ty in 0..target_h {
+        for tx in 0..target_w {
+            let x = tx * step_x;
+            let y = ty * step_y;
+            out.push(tiles[(y * src_size + x) as usize]);
+        }
+    }
+
+    out
 }
