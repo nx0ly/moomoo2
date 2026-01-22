@@ -252,6 +252,16 @@ export class Game {
         }
 
         break;
+      
+      case 4:
+        this.renderer.animals = packet.data.animals.map(a => ({
+          sid: a.id,
+          x: a.x,
+          y: a.y,
+          type: a.animal_type
+        }))
+        console.log(this.renderer.animals[0])
+        break;
 
       default:
         console.warn("unknown packet type:", packet.code);

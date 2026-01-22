@@ -15,10 +15,13 @@ use x25519_dalek::{EphemeralSecret, PublicKey};
 use bevy_ecs::prelude::*;
 use dashmap::DashMap;
 use parking_lot::Mutex;
-use shared::structs::server::{Move, Player};
 use shared::to_client::{ClientMessages, PlayerTO, UpdatePlayerData};
 use shared::to_server::{MoveMessage, SpawnMessage};
 use shared::PacketType;
+use shared::{
+    structs::server::{Move, Player},
+    to_client::{AddAnimalData, AnimalTO},
+};
 use tokio::sync::mpsc as god;
 use tokio::sync::Mutex as AsyncMutex;
 use wtransport::*;
@@ -33,8 +36,9 @@ use crate::{
     errors::{GameError, InternalGameMessages},
     structs::{
         bevy::{IDToConnection, PlayerConnection, PlayerMap, World},
-        components::{spawn_wall, Position},
+        components::{spawn_wall, AiState, AiTarget, AnimalType, Position, Velocity},
     },
+    systems::GlobalRng,
 };
 
 mod config;
@@ -163,6 +167,45 @@ async fn main() -> anyhow::Result<()> {
 
         let mut w = world.lock();
         w.bevy_world.insert_resource(PlayerMap::default());
+        w.bevy_world.insert_resource(GlobalRng(WyRand::new()));
+
+        // FOR TESTING!
+        // initialize 2000 fish
+        let mut rng = WyRand::new();
+
+        w.bevy_world.spawn((
+            Position { x: 0., y: 0. },
+            Velocity {
+                vx: (rng.generate::<f32>() - 0.5) * 50.0,
+                vy: (rng.generate::<f32>() - 0.5) * 50.0,
+            },
+            AiState::Wander,
+            AiTarget {
+                x: 0.,
+                y: 0.,
+                target: None,
+            },
+            AnimalType::Fish,
+        ));
+        for _ in 0..2000 {
+            let x = (rng.generate::<f32>() * 8192.);
+            let y = (rng.generate::<f32>() * 8192.);
+
+            w.bevy_world.spawn((
+                Position { x, y },
+                Velocity {
+                    vx: (rng.generate::<f32>() - 0.5) * 50.0,
+                    vy: (rng.generate::<f32>() - 0.5) * 50.0,
+                },
+                AiState::Wander,
+                AiTarget {
+                    x: x + (rng.generate::<f32>() - 0.5) * 100.0,
+                    y: y + (rng.generate::<f32>() - 0.5) * 100.0,
+                    target: None,
+                },
+                AnimalType::Fish,
+            ));
+        }
 
         // initialize wall boundary colliders
 
@@ -352,6 +395,7 @@ async fn main() -> anyhow::Result<()> {
     let mut schedule = Schedule::default();
     schedule.add_systems((
         systems::movement_system,
+        systems::animal_ai_system,
         systems::collision_resolution_system,
     ));
 
@@ -450,8 +494,31 @@ async fn main() -> anyhow::Result<()> {
             }
         }
 
+        let mut animal_updates = Vec::new();
+        let mut animal_query = bevy.query::<(Entity, &Position, &AnimalType)>();
+        let iterator = animal_query.iter(&world_locked.bevy_world);
+        for (entity, pos, _type) in iterator {
+            animal_updates.push(AnimalTO {
+                id: entity.index(),
+                x: pos.x,
+                y: pos.y,
+                animal_type: *_type as u8,
+            })
+        }
+
         if !updates.is_empty() {
             let update_msg = encode(3, UpdatePlayerData { players: updates }).unwrap();
+            World::broadcast(&update_msg, &player_connections).await;
+        }
+
+        if !animal_updates.is_empty() {
+            let update_msg = encode(
+                4,
+                AddAnimalData {
+                    animals: animal_updates,
+                },
+            )
+            .unwrap();
             World::broadcast(&update_msg, &player_connections).await;
         }
     }

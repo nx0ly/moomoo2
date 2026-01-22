@@ -31,10 +31,34 @@ impl From<ServerPlayer> for PlayerTO {
     }
 }
 
+
+// DO NOT RENAME OR REORDER THE FOLLOWING ENUM!
+#[derive(Debug, Clone, BorshDeserialize, BorshSerialize)]
+#[cfg_attr(feature = "server", derive(Component))]
+#[cfg_attr(feature = "web", derive(Serialize, Deserialize))]
+#[repr(u8)]
+#[borsh(use_discriminant=true)]
+pub enum AnimalType {
+    Wolf = 0,
+    Fish = 1,
+}
+
+#[derive(Debug, Clone, BorshDeserialize, BorshSerialize)]
+#[cfg_attr(feature = "server", derive(Component))]
+#[cfg_attr(feature = "web", derive(Serialize, Deserialize))]
+pub struct AnimalTO {
+    pub id: u32,
+    pub x: f32,
+    pub y: f32,
+    pub animal_type: u8,
+}
+
+
 #[derive(Debug, Clone, BorshDeserialize, BorshSerialize)]
 #[cfg_attr(feature = "web", derive(Serialize, Deserialize))]
 pub enum ClientMessages {
     AddPlayer(AddPlayerData),
+   // AddAnimal(AddAnimalData),
 }
 
 #[derive(Debug, Clone, BorshDeserialize, BorshSerialize)]
@@ -49,3 +73,12 @@ pub struct AddPlayerData {
 pub struct UpdatePlayerData {
     pub players: Vec<PlayerTO>
 }
+
+#[derive(Debug, Clone, BorshDeserialize, BorshSerialize)]
+#[cfg_attr(feature = "server", derive(Component))]
+#[cfg_attr(feature = "web", derive(Serialize, Deserialize))]
+pub struct AddAnimalData {
+    pub animals: Vec<AnimalTO>
+}
+
+// send animials packets to client and render to make sure fishes and animal systems work

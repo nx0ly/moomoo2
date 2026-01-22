@@ -1,0 +1,1 @@
+FROM docker.io/library/rust:1.75 AS builder

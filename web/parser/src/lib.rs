@@ -1,5 +1,5 @@
 use serde::Serialize;
-use shared::to_client::{AddPlayerData, ClientMessages, UpdatePlayerData};
+use shared::to_client::{AddAnimalData, AddPlayerData, ClientMessages, UpdatePlayerData};
 use shared::{
     PacketType,
     structs::client::{JsMove, JsPlayer},
@@ -234,6 +234,15 @@ pub fn decode_bytes(bytes: &[u8]) -> Result<JsValue, JsValue> {
             Some(PacketType::UpdatePlayers) => {
                 let data = borsh::from_slice::<UpdatePlayerData>(&bytes[1..]).map_err(|e| {
                     JsValue::from_str(&format!("error decoding updateplayers {}", e))
+                })?;
+                let packet = DecodedPacket { code: *code, data };
+
+                Ok(serde_wasm_bindgen::to_value(&packet)
+                    .map_err(|e| JsValue::from_str(&e.to_string()))?)
+            }
+            Some(PacketType::AddAnimal) => {
+                let data = borsh::from_slice::<AddAnimalData>(&bytes[1..]).map_err(|e| {
+                    JsValue::from_str(&format!("error decoding addanimal {}", e))
                 })?;
                 let packet = DecodedPacket { code: *code, data };
 

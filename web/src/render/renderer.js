@@ -7,40 +7,37 @@ export class Render {
     this.game = game;
     this.app = new Application();
     this.camera = new Camera(4096, 4096);
+    
+    this.world = new Container();
+    this.ui = new Container();
+    
     this.worldBounds = new Graphics();
     this.worldBounds.rect(0, 0, 8192, 8192).fill(0x768f5a);
     this.grid = new Graphics();
-    this.drawGrid(this.grid, 8192, 8192, 64);
-
-    this.world = new Container();
-    this.ui = new Container();
-
+    
     this.world.addChild(this.worldBounds);
     this.world.addChild(this.grid);
 
-    this.textures = {};
     this.player_id_to_sprite = {};
+    this.animal_id_to_sprite = {}; 
+    this.textures = {};
+    this.animals = [];
+
+    this.lastCleanupTime = 0;
+    this.cleanupInterval = 1000;
+    
+    this.drawGrid(this.grid, 8192, 8192, 64);
   }
 
   drawGrid(g, w, h, s) {
     g.clear();
-    g.stroke({ width: 4, color: 0x000000, alpha: 0.06 });
-
-    for (let x = 0; x < w; x += s) {
-      g.stroke({ width: 4, color: 0x000000, alpha: 0.06 });
-
-      g.moveTo(x, 0);
-      g.lineTo(x, h);
+    const lineStyle = { width: 4, color: 0x000000, alpha: 0.06 };
+    for (let x = 0; x <= w; x += s) {
+      g.moveTo(x, 0).lineTo(x, h).stroke(lineStyle);
     }
-
-    for (let y = 0; y < h; y += s) {
-      g.stroke({ width: 4, color: 0x000000, alpha: 0.06 });
-
-      g.moveTo(0, y);
-      g.lineTo(w, y);
+    for (let y = 0; y <= h; y += s) {
+      g.moveTo(0, y).lineTo(w, y).stroke(lineStyle);
     }
-
-    g.stroke();
   }
 
   async init() {
@@ -48,69 +45,87 @@ export class Render {
       view: document.getElementById("mainCanvas"),
       background: "#000",
       resizeTo: window,
-      resolution: 2,
+      resolution: window.devicePixelRatio || 1,
+      antialias: false,
     });
 
-    await document.fonts.ready;
-
     await Assets.load(PlayerSVG);
-    const playerTex = Assets.get(PlayerSVG);
-
-    this.textures.player_texture = playerTex;
+    this.textures.player_texture = Assets.get(PlayerSVG);
 
     this.app.stage.addChild(this.world);
     this.app.stage.addChild(this.ui);
-
     this.app.ticker.add(this.draw);
   }
 
-  draw = (delta) => {
-    if (!this.game?.my_player) return;
+  draw = (ticker) => {
+    const myPlayer = this.game?.my_player;
+    if (!myPlayer) return;
 
-    delta = delta.deltaMS * 0.001;
+    const now = performance.now();
+    const delta = ticker.deltaMS * 0.001;
+    const interpolationAlpha = 1 - Math.pow(0.75, delta / 0.067);
 
-    this.game.players.forEach((player) => {
-      let sprite = this.player_id_to_sprite[player.id];
+    const camDx = myPlayer.x - this.camera.x;
+    const camDy = myPlayer.y - this.camera.y;
+    this.camera.x += camDx * delta * 4;
+    this.camera.y += camDy * delta * 4;
 
-      if (sprite._renderX === undefined) {
-        sprite._renderX = sprite.x;
-        sprite._renderY = sprite.y;
+    this.world.x = (this.app.screen.width >> 1) - this.camera.x;
+    this.world.y = (this.app.screen.height >> 1) - this.camera.y;
+
+    const players = this.game.players;
+    for (let i = 0; i < players.length; i++) {
+      const p = players[i];
+      let s = this.player_id_to_sprite[p.id];
+
+      if (!s) {
+        s = new Sprite(this.textures.player_texture);
+        s.anchor.set(0.5);
+        s.width = s.height = 70;
+        this.player_id_to_sprite[p.id] = s;
+        this.world.addChild(s);
+        s._rx = p.x; s._ry = p.y;
       }
 
-      const alpha = 1 - Math.pow(1 - 0.25, delta / 0.067);
+      s._rx += (p.x - s._rx) * interpolationAlpha;
+      s._ry += (p.y - s._ry) * interpolationAlpha;
+      s.x = s._rx;
+      s.y = s._ry;
+    }
+    
+    for (let i = 0; i < this.animals.length; i++) {
+      const a = this.animals[i];
+      let g = this.animal_id_to_sprite[a.sid];
 
-      sprite._renderX += (player.x - sprite._renderX) * alpha;
-      sprite._renderY += (player.y - sprite._renderY) * alpha;
-
-      sprite.x = sprite._renderX;
-      sprite.y = sprite._renderY;
-
-      if (sprite.nameText) {
-        sprite.nameText.x = sprite._renderX;
-        sprite.nameText.y = sprite._renderY - sprite.height * 0.6 - 10;
+      if (!g) {
+        // help fix
+        g = new Graphics()
+          .circle(0, 0, 20)
+          .fill(0xff4444)
+          .stroke({ width: 3, color: 0x000000 });
+        
+        g._rx = a.x; g._ry = a.y;
+        this.animal_id_to_sprite[a.sid] = g;
+        this.world.addChild(g);
       }
-    });
 
-    const dx = this.game.my_player.x - this.camera.x;
-    const dy = this.game.my_player.y - this.camera.y;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    const dir = Math.atan2(dy, dx);
+      g._rx += (a.x - g._rx) * interpolationAlpha;
+      g._ry += (a.y - g._ry) * interpolationAlpha;
+      g.x = g._rx;
+      g.y = g._ry;
+      
+      g._lastSeen = now;
+    }
 
-    const speed = Math.min(dist * delta * 3.5, dist);
-
-    this.camera.x += Math.cos(dir) * speed;
-    this.camera.y += Math.sin(dir) * speed;
-
-    const halfW = this.app.screen.width / 2;
-    const halfH = this.app.screen.height / 2;
-
-    this.world.x = halfW - this.camera.x;
-    this.world.y = halfH - this.camera.y;
+    if (now - this.lastCleanupTime > this.cleanupInterval) {
+      for (const sid in this.animal_id_to_sprite) {
+        const sprite = this.animal_id_to_sprite[sid];
+        if (now - sprite._lastSeen > 2000) {
+          this.world.removeChild(sprite);
+          delete this.animal_id_to_sprite[sid];
+        }
+      }
+      this.lastCleanupTime = now;
+    }
   };
-  /*
-   * v.dt += e;
-              var a = Math.min(1.5, v.dt / (n.serverTickrate * 1.2));
-              v.x = v.x1 + (v.x2 - v.x1) * a;
-              v.y = v.y1 + (v.y2 - v.y1) * a;
-              */
 }
