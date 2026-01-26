@@ -35,3 +35,4 @@ hkdf = "0.12.4"
 nanorand = { version = "0.7.0", features = ["wyrand"] }
 noise = "0.9.0"
 futures-lite = "2.6.1"
+once_cell = "1.21.3"

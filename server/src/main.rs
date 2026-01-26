@@ -32,7 +32,7 @@ use pqc_kyber::{KYBER_PUBLICKEYBYTES, KYBER_SSBYTES};
 use nanorand::{Rng, WyRand};
 
 use crate::{
-    config::config::load_config,
+    config::config::{load_config, Config},
     errors::{GameError, InternalGameMessages},
     structs::{
         bevy::{IDToConnection, PlayerConnection, PlayerMap, World},
@@ -47,6 +47,9 @@ mod structs;
 mod systems;
 
 use borsh_derive::{BorshDeserialize, BorshSerialize};
+
+pub static CONFIG: once_cell::sync::Lazy<Config> =
+    once_cell::sync::Lazy::new(|| load_config().expect("Failed to load config"));
 
 #[derive(BorshSerialize, BorshDeserialize)]
 struct ClientHello {
@@ -173,26 +176,14 @@ async fn main() -> anyhow::Result<()> {
         // initialize 2000 fish
         let mut rng = WyRand::new();
 
-        w.bevy_world.spawn((
-            Position { x: 0., y: 0. },
-            Velocity {
-                vx: (rng.generate::<f32>() - 0.5) * 50.0,
-                vy: (rng.generate::<f32>() - 0.5) * 50.0,
-            },
-            AiState::Wander,
-            AiTarget {
-                x: 0.,
-                y: 0.,
-                target: None,
-            },
-            AnimalType::Fish,
-            AnimalEntity,
-            Collider::circle(35.0),
-            NonReactiveCollider,
-        ));
+        let min_x = CONFIG.map.ocean_start_x as f32;
+        let max_x = CONFIG.map.ocean_end_x as f32;
+        let min_y = 0.0;
+        let max_y = CONFIG.map.size as f32;
+
         for _ in 0..2000 {
-            let x = (rng.generate::<f32>() * 8192.);
-            let y = (rng.generate::<f32>() * 8192.);
+            let x = min_x + (rng.generate::<f32>() * (max_x - min_x));
+            let y = min_y + (rng.generate::<f32>() * (max_y - min_y));
 
             w.bevy_world.spawn((
                 Position { x, y },
@@ -212,30 +203,35 @@ async fn main() -> anyhow::Result<()> {
                 NonReactiveCollider,
             ));
         }
-
         // initialize wall boundary colliders
 
         w.bevy_world.spawn((
-            Position { x: 4096., y: 0. },
-            Collider::rect(4096., 10.),
+            Position { x: 8192., y: 0. },
+            Collider::rect(8192., 10.),
             NonReactiveCollider,
         ));
 
         w.bevy_world.spawn((
-            Position { x: 4096., y: 8192. },
-            Collider::rect(4096., 10.),
+            Position {
+                x: 8192.,
+                y: 16384.,
+            },
+            Collider::rect(8192., 10.),
             NonReactiveCollider,
         ));
 
         w.bevy_world.spawn((
-            Position { x: 0., y: 4096. },
-            Collider::rect(10., 4096.),
+            Position { x: 0., y: 8192. },
+            Collider::rect(10., 8192.),
             NonReactiveCollider,
         ));
 
         w.bevy_world.spawn((
-            Position { x: 8192., y: 4196. },
-            Collider::rect(10., 4196.),
+            Position {
+                x: 16384.,
+                y: 8192.,
+            },
+            Collider::rect(10., 8192.),
             NonReactiveCollider,
         ));
     }
@@ -362,8 +358,8 @@ async fn main() -> anyhow::Result<()> {
                                             player_id,
                                             InternalGameMessages::AddPlayer(Player {
                                                 name: data.name,
-                                                x: 4000.,
-                                                y: 4000.,
+                                                x: 10000.,
+                                                y: 10000.,
                                                 id: player_id,
                                                 move_dir: None,
                                                 vx: 0.0,

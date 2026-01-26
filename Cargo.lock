@@ -2379,6 +2379,7 @@ dependencies = [
  "hkdf",
  "nanorand",
  "noise",
+ "once_cell",
  "parking_lot",
  "pqc_kyber",
  "rand 0.8.5",
