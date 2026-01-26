@@ -7,7 +7,6 @@ import {
   TextStyle,
 } from "pixi.js";
 import init, {
-  decode_bytes,
   encode_into_bytes,
   HandshakeState,
   SessionCrypto,
@@ -15,6 +14,7 @@ import init, {
 import { Render } from "./render/renderer";
 import utils from "./utils";
 import Player from "./objects/player";
+import { decodePacket } from "./packetHandler";
 
 export class Game {
   constructor() {
@@ -172,7 +172,7 @@ export class Game {
 
           try {
             const plaintext = this.crypto.decrypt(ciphertext);
-            const packet = decode_bytes(plaintext);
+            const packet = decodePacket(plaintext);
             this.handlePacket(packet);
           } catch (e) {
             console.error("decrypt error:", e);
