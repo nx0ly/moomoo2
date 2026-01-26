@@ -119,7 +119,6 @@ async fn perform_handshake(
         .read(&mut buf)
         .await?
         .ok_or_else(|| anyhow::anyhow!("stream closed during handshake"))?;
-
     let client_hello: ClientHello = borsh::from_slice(&buf[..len])?;
 
     let client_x25519_pk = PublicKey::from(client_hello.x25519_pk);
@@ -348,11 +347,10 @@ async fn main() -> anyhow::Result<()> {
                             continue;
                         }
                         let opcode = plaintext[0];
-
                         match PacketType::from_u8(opcode) {
                             Some(PacketType::Spawn) => {
                                 if let Ok(data) = decode::<SpawnMessage>(&plaintext[1..]) {
-                                    let mut rng = WyRand::new();
+                                    // let mut rng = WyRand::new(); //ok
                                     let _ = game_tx
                                         .send((
                                             player_id,

@@ -30,7 +30,7 @@ rand = "0.8"
 rand_core = "0.6"
 x25519-dalek = { version = "2.0", features = ["static_secrets"] }
 sha2 = "0.10.9"
-pqc_kyber = { version = "0.7.1", features = ["kyber768", "90s", "avx2"] }
+pqc_kyber = { version = "0.7.1", features = ["kyber768", "90s"] }
 hkdf = "0.12.4"
 nanorand = { version = "0.7.0", features = ["wyrand"] }
 noise = "0.9.0"

@@ -6,3 +6,10 @@ package.authors = ["JavedPension"]
 package.license-file = "LICENSE"
 package.description = "a modernized moomoo.io clone"
 package.keywords = ["moomoo", "cowgame", "moomoo.io", "moomoo2", "moomoo2.io", "new moomoo", "hack", "mod", "game", "clone", "josh", "frvr"]
+
+[profile.release]
+opt-level = 2
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
