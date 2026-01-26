@@ -2,3 +2,6 @@
 initial = 2048
 increment_per_player = 512
 dead_zone_dpt = 10
+
+[players]
+acceleration = 1

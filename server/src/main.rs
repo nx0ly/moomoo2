@@ -36,9 +36,9 @@ use crate::{
     errors::{GameError, InternalGameMessages},
     structs::{
         bevy::{IDToConnection, PlayerConnection, PlayerMap, World},
-        components::{spawn_wall, AiState, AiTarget, AnimalType, Position, Velocity},
+        components::{spawn_wall, AiState, AiTarget, AnimalEntity, AnimalType, Position, Velocity},
     },
-    systems::GlobalRng,
+    systems::{GlobalRng, ReactiveCollider},
 };
 
 mod config;
@@ -186,6 +186,9 @@ async fn main() -> anyhow::Result<()> {
                 target: None,
             },
             AnimalType::Fish,
+            AnimalEntity,
+            Collider::circle(35.0),
+            NonReactiveCollider,
         ));
         for _ in 0..2000 {
             let x = (rng.generate::<f32>() * 8192.);
@@ -204,6 +207,9 @@ async fn main() -> anyhow::Result<()> {
                     target: None,
                 },
                 AnimalType::Fish,
+                AnimalEntity,
+                Collider::circle(35.0),
+                NonReactiveCollider,
             ));
         }
 
@@ -356,10 +362,8 @@ async fn main() -> anyhow::Result<()> {
                                             player_id,
                                             InternalGameMessages::AddPlayer(Player {
                                                 name: data.name,
-                                                x: (rng.generate::<u32>() as f32 / u32::MAX as f32)
-                                                    * 500.0,
-                                                y: (rng.generate::<u32>() as f32 / u32::MAX as f32)
-                                                    * 500.0,
+                                                x: 4000.,
+                                                y: 4000.,
                                                 id: player_id,
                                                 move_dir: None,
                                                 vx: 0.0,

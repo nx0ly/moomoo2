@@ -1,209 +1,149 @@
-// implementation of a quad tree for collision resolution.
-// see: https://en.wikipedia.org/wiki/Quadtree
-
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Point {
     pub x: f32,
     pub y: f32,
-}
-
-impl Point {
-    #[inline]
-    pub fn new(x: f32, y: f32) -> Self {
-        Self { x, y }
-    }
-
-    #[inline]
-    pub fn dist(x1: f32, y1: f32, x2: f32, y2: f32) -> f32 {
-        // using squared distance
-        (x2 - x1).powf(2.) + (y2 - y1).powf(2.)
-    }
+    pub index: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct Rect {
-    pub x: f32,
-    pub y: f32,
-    pub width: f32,
-    pub height: f32,
+    pub x_min: f32,
+    pub y_min: f32,
+    pub x_max: f32,
+    pub y_max: f32,
 }
 
 impl Rect {
-    #[inline]
+    #[inline(always)]
     pub fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
         Self {
-            x,
-            y,
-            width,
-            height,
+            x_min: x - width,
+            y_min: y - height,
+            x_max: x + width,
+            y_max: y + height,
         }
     }
 
-    pub fn has_point(&self, point: Point) -> bool {
-        point.x >= self.x - self.width
-            && point.x <= self.x + self.width
-            && point.y >= self.y - self.height
-            && point.y <= self.y + self.height
+    #[inline(always)]
+    pub fn contains(&self, p: &Point) -> bool {
+        // inshallah this gets optimized by compiler
+        p.x >= self.x_min && p.x <= self.x_max && p.y >= self.y_min && p.y <= self.y_max
     }
 
-    pub fn intersects_rect(&self, rect: &Rect) -> bool {
-        return !(rect.x - rect.width > self.x + self.width
-            || rect.x + rect.width < self.x - self.width
-            || rect.y - rect.height > self.y + self.height
-            || rect.y + rect.height < self.y - self.height);
+    #[inline(always)]
+    pub fn intersects(&self, other: &Rect) -> bool {
+        !(other.x_min > self.x_max
+            || other.x_max < self.x_min
+            || other.y_min > self.y_max
+            || other.y_max < self.y_min)
     }
 }
 
-#[derive(Debug, Clone)]
 pub struct Quadtree {
     boundary: Rect,
     capacity: usize,
     points: Vec<Point>,
-    divided: bool,
-    top_left: Option<Box<Quadtree>>,
-    top_right: Option<Box<Quadtree>>,
-    bottom_left: Option<Box<Quadtree>>,
-    bottom_right: Option<Box<Quadtree>>,
+    children: Option<Box<[Quadtree; 4]>>,
 }
 
 impl Quadtree {
-    #[inline]
     pub fn new(boundary: Rect, capacity: usize) -> Self {
         Self {
             boundary,
             capacity,
-            points: Vec::new(),
-            divided: false,
-            top_left: None,
-            top_right: None,
-            bottom_left: None,
-            bottom_right: None,
+            points: Vec::with_capacity(capacity),
+            children: None,
         }
     }
 
-    // return false if it already contains the point.
-    pub fn insert(&mut self, point: &Point) -> bool {
-        if !self.boundary.has_point(*point) {
+    pub fn insert(&mut self, point: Point) -> bool {
+        if !self.boundary.contains(&point) {
             return false;
         }
 
-        if self.points.len() < self.capacity {
-            self.points.push(*point);
-            return true;
-        } else {
-            if !self.divided {
-                self.subdivide();
-            }
-
-            if self.top_right.as_mut().unwrap().insert(point) {
+        if self.children.is_none() {
+            if self.points.len() < self.capacity {
+                self.points.push(point);
                 return true;
             }
-            if self.top_left.as_mut().unwrap().insert(point) {
-                return true;
-            }
-            if self.bottom_right.as_mut().unwrap().insert(point) {
-                return true;
-            }
-            if self.bottom_left.as_mut().unwrap().insert(point) {
-                return true;
-            }
-
-            return false;
+            self.subdivide();
         }
+
+        let children = unsafe { self.children.as_mut().unwrap_unchecked() };
+
+        children[0].insert(point)
+            || children[1].insert(point)
+            || children[2].insert(point)
+            || children[3].insert(point)
     }
 
     fn subdivide(&mut self) {
-        // if exceeds capacity of a quad, divide into smaller quads.
-        let top_right = Rect::new(
-            self.boundary.x + self.boundary.width / 2.,
-            self.boundary.y - self.boundary.height / 2.,
-            self.boundary.width / 2.,
-            self.boundary.height / 2.,
+        let x_mid = (self.boundary.x_min + self.boundary.x_max) * 0.5;
+        let y_mid = (self.boundary.y_min + self.boundary.y_max) * 0.5;
+
+        let nw = Quadtree::new(
+            Rect {
+                x_min: self.boundary.x_min,
+                y_min: self.boundary.y_min,
+                x_max: x_mid,
+                y_max: y_mid,
+            },
+            self.capacity,
         );
-        let top_left = Rect::new(
-            self.boundary.x - self.boundary.width / 2.,
-            self.boundary.y - self.boundary.height / 2.,
-            self.boundary.width / 2.,
-            self.boundary.height / 2.,
+        let ne = Quadtree::new(
+            Rect {
+                x_min: x_mid,
+                y_min: self.boundary.y_min,
+                x_max: self.boundary.x_max,
+                y_max: y_mid,
+            },
+            self.capacity,
         );
-        let bottom_right = Rect::new(
-            self.boundary.x + self.boundary.width / 2.,
-            self.boundary.y + self.boundary.height / 2.,
-            self.boundary.width / 2.,
-            self.boundary.height / 2.,
+        let sw = Quadtree::new(
+            Rect {
+                x_min: self.boundary.x_min,
+                y_min: y_mid,
+                x_max: x_mid,
+                y_max: self.boundary.y_max,
+            },
+            self.capacity,
         );
-        let bottom_left = Rect::new(
-            self.boundary.x - self.boundary.width / 2.,
-            self.boundary.y - self.boundary.height / 2.,
-            self.boundary.width / 2.,
-            self.boundary.height / 2.,
+        let se = Quadtree::new(
+            Rect {
+                x_min: x_mid,
+                y_min: y_mid,
+                x_max: self.boundary.x_max,
+                y_max: self.boundary.y_max,
+            },
+            self.capacity,
         );
 
-        self.top_right = Some(Box::new(Quadtree::new(top_right, self.capacity)));
-        self.top_left = Some(Box::new(Quadtree::new(top_left, self.capacity)));
-        self.bottom_right = Some(Box::new(Quadtree::new(bottom_right, self.capacity)));
-        self.bottom_left = Some(Box::new(Quadtree::new(bottom_left, self.capacity)));
+        self.children = Some(Box::new([nw, ne, sw, se]));
 
-        self.divided = true;
+        for p in self.points.drain(..) {
+            for child in self.children.as_mut().unwrap().iter_mut() {
+                if child.insert(p) {
+                    break;
+                }
+            }
+        }
     }
 
-    pub fn get_points_within_rect(&self, rect: Rect) -> Vec<Point> {
-        let mut points: Vec<Point> = Vec::new();
+    pub fn query(&self, range: &Rect, found: &mut Vec<Point>) {
+        if !self.boundary.intersects(range) {
+            return;
+        }
 
-        // check if the rectangle lies within the bound of the quad tree.
-        if !self.boundary.intersects_rect(&rect) {
-            return points;
-        } else {
-            self.points.iter().for_each(|point| {
-                if rect.has_point(*point) {
-                    points.push(*point);
-                }
-            });
-
-            if self.divided {
-                let top_left_points = self.top_left.as_ref().unwrap().get_points_within_rect(rect);
-                let top_right_points = self
-                    .top_right
-                    .as_ref()
-                    .unwrap()
-                    .get_points_within_rect(rect);
-                let bottom_left_points = self
-                    .bottom_left
-                    .as_ref()
-                    .unwrap()
-                    .get_points_within_rect(rect);
-                let bottom_right_points = self
-                    .bottom_right
-                    .as_ref()
-                    .unwrap()
-                    .get_points_within_rect(rect);
-
-                points.extend(top_left_points);
-                points.extend(top_right_points);
-                points.extend(bottom_left_points);
-                points.extend(bottom_right_points);
+        for point in &self.points {
+            if range.contains(point) {
+                found.push(*point);
             }
         }
 
-        points
-    }
-
-    pub fn get_points_within_circle(&self, x: f32, y: f32, rad: f32) -> Vec<Point> {
-        // i'm using the same strategy here as used in the 'quadtree-simple' crate.
-        // use a rect with same size to query for points
-        // then filter those to the radius of the circle.
-
-        let rect = Rect::new(x, y, rad, rad);
-        let mut temp = self.get_points_within_rect(rect);
-        temp.retain(|point| {
-            let dist = Point::dist(point.x, point.y, x, y);
-            if dist < rad.powf(2.) {
-                true
-            } else {
-                false
+        if let Some(children) = &self.children {
+            for child in children.iter() {
+                child.query(range, found);
             }
-        });
-
-        temp
+        }
     }
 }
