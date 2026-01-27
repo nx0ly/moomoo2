@@ -21,3 +21,6 @@ sha2 = "0.10.9"
 hkdf = "0.12.4"
 getrandom = { version = "0.2", features = ["js"] }
 rand_core = "0.6"
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-O3", "--enable-bulk-memory"]

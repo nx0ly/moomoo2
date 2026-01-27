@@ -20,8 +20,6 @@ use pqc_kyber::{
 use sha2::Sha256;
 use x25519_dalek::{PublicKey, StaticSecret};
 
-
-
 // TODO: remove dependency on serde_wasm_bindgen
 // its kinda slow
 
@@ -202,8 +200,38 @@ struct DecodedPacket<T> {
     data: T,
 }
 
+use std::cell::UnsafeCell;
+
+const BUFFER_SIZE: usize = 512 * 1024;
+
+struct SyncBuffer(UnsafeCell<[u8; BUFFER_SIZE]>);
+unsafe impl Sync for SyncBuffer {}
+
+static BUFFER: SyncBuffer = SyncBuffer(UnsafeCell::new([0u8; BUFFER_SIZE]));
+
+const DATA_OFFSET: usize = 4;
+
 #[wasm_bindgen]
-pub fn decode_bytes(bytes: &[u8]) -> Result<JsValue, JsValue> {
+pub fn get_buffer_ptr() -> *mut u8 {
+    unsafe { (*BUFFER.0.get()).as_mut_ptr() }
+}
+
+#[wasm_bindgen]
+pub fn get_buffer_size() -> usize {
+    BUFFER_SIZE
+}
+#[wasm_bindgen]
+pub fn decode_bytes() -> Result<JsValue, JsValue> {
+    let bytes = unsafe {
+        let ptr = BUFFER.0.get();
+        let buf = &*ptr;
+        let length = u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
+        std::slice::from_raw_parts(buf.as_ptr().add(DATA_OFFSET), length)
+    };
+
+    decode_bytes_inner(bytes)
+}
+fn decode_bytes_inner(bytes: &[u8]) -> Result<JsValue, JsValue> {
     if bytes.is_empty() {
         return Err(JsValue::from_str("empty"));
     }
@@ -221,17 +249,15 @@ pub fn decode_bytes(bytes: &[u8]) -> Result<JsValue, JsValue> {
                 };
 
                 let packet = DecodedPacket { code: *code, data };
-
                 Ok(serde_wasm_bindgen::to_value(&packet)
-                    .map_err(|e| JsValue::from_str(&e.to_string()))?)
+                                   .map_err(|e| JsValue::from_str(&e.to_string()))?)
             }
             Some(PacketType::Move) => {
                 let data = borsh::from_slice::<Move>(&bytes[1..])
                     .map_err(|e| JsValue::from_str(&format!("error decoding move {}", e)))?;
                 let packet = DecodedPacket { code: *code, data };
-
                 Ok(serde_wasm_bindgen::to_value(&packet)
-                    .map_err(|e| JsValue::from_str(&e.to_string()))?)
+                                   .map_err(|e| JsValue::from_str(&e.to_string()))?)
             }
             Some(PacketType::UpdatePlayers) => {
                 let data = borsh::from_slice::<UpdatePlayerData>(&bytes[1..]).map_err(|e| {
@@ -240,16 +266,15 @@ pub fn decode_bytes(bytes: &[u8]) -> Result<JsValue, JsValue> {
                 let packet = DecodedPacket { code: *code, data };
 
                 Ok(serde_wasm_bindgen::to_value(&packet)
-                    .map_err(|e| JsValue::from_str(&e.to_string()))?)
+                                   .map_err(|e| JsValue::from_str(&e.to_string()))?)
             }
             Some(PacketType::AddAnimal) => {
-                let data = borsh::from_slice::<AddAnimalData>(&bytes[1..]).map_err(|e| {
-                    JsValue::from_str(&format!("error decoding addanimal {}", e))
-                })?;
+                let data = borsh::from_slice::<AddAnimalData>(&bytes[1..])
+                    .map_err(|e| JsValue::from_str(&format!("error decoding addanimal {}", e)))?;
                 let packet = DecodedPacket { code: *code, data };
 
                 Ok(serde_wasm_bindgen::to_value(&packet)
-                    .map_err(|e| JsValue::from_str(&e.to_string()))?)
+                                   .map_err(|e| JsValue::from_str(&e.to_string()))?)
             }
             None => Err(JsValue::from_str("unknown opcode")),
         },

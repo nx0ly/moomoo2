@@ -14,7 +14,7 @@ import init, {
 import { Render } from "./render/renderer";
 import utils from "./utils";
 import Player from "./objects/player";
-import { decodePacket } from "./packetHandler";
+import { decodePacket, initDecoder } from "./packetHandler";
 
 export class Game {
   constructor() {
@@ -36,6 +36,7 @@ export class Game {
 
   async init() {
     await init();
+    await initDecoder();
     await this.renderer.init();
 
     // hooks
@@ -260,7 +261,7 @@ export class Game {
           y: a.y,
           type: a.animal_type
         }))
-        console.log(this.renderer.animals[0])
+        // console.log(this.renderer.animals[0]) //we already know its bad gng
         break;
 
       default:
