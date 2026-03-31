@@ -8,10 +8,10 @@ export class Render {
     this.game = game;
     this.app = new Application();
     this.camera = new Camera(10000, 10000);
-    
+
     this.world = new Container();
     this.ui = new Container();
-    
+
     this.worldBounds = new Graphics();
     this.worldBounds.rect(0, 0, 10240, 4096).fill(0xffffff); // snow
     this.worldBounds.rect(0, 4096, 10240, 4096).fill(0x768f5a); // grassland
@@ -20,18 +20,18 @@ export class Render {
     this.worldBounds.rect(10240, 0, 6144, 16384).fill(0x588fb2); // ocean
 
     this.grid = new Graphics();
-    
+
     this.world.addChild(this.worldBounds);
     this.world.addChild(this.grid);
 
     this.player_id_to_sprite = {};
-    this.animal_id_to_sprite = {}; 
+    this.animal_id_to_sprite = {};
     this.textures = {};
     this.animals = [];
 
     this.lastCleanupTime = 0;
     this.cleanupInterval = 1000;
-    
+
     this.drawGrid(this.grid, 16384, 16384, 64);
   }
 
@@ -57,7 +57,7 @@ export class Render {
 
     const playerAsset = await Assets.load(PlayerSVG);
     const fishAsset = await Assets.load(FishPNG);
-    
+
     this.textures.player_texture = playerAsset;
     this.textures.fish_texture = fishAsset;
 
@@ -93,7 +93,8 @@ export class Render {
         s.width = s.height = 70;
         this.player_id_to_sprite[p.id] = s;
         this.world.addChild(s);
-        s._rx = p.x; s._ry = p.y;
+        s._rx = p.x;
+        s._ry = p.y;
       }
 
       s._rx += (p.x - s._rx) * interpolationAlpha;
@@ -101,7 +102,7 @@ export class Render {
       s.x = s._rx;
       s.y = s._ry;
     }
-    
+
     for (let i = 0; i < this.animals.length; i++) {
       const a = this.animals[i];
       let s = this.animal_id_to_sprite[a.sid];
@@ -109,10 +110,10 @@ export class Render {
       if (!s) {
         s = new Sprite(this.textures.fish_texture);
         s.anchor.set(0.5);
-        
-        s.width = s.height = 128; 
-        
-        s._rx = a.x; 
+
+        s.width = s.height = 128;
+
+        s._rx = a.x;
         s._ry = a.y;
         this.animal_id_to_sprite[a.sid] = s;
         this.world.addChild(s);
@@ -122,14 +123,14 @@ export class Render {
       const dy = a.y - s.y;
 
       if (Math.abs(dx) > 0.1 || Math.abs(dy) > 0.1) {
-        s.rotation = Math.atan2(dy, dx);
+        s.rotation = Math.atan2(dy, dx) - Math.PI / 2;
       }
 
       s._rx += (a.x - s._rx) * interpolationAlpha;
       s._ry += (a.y - s._ry) * interpolationAlpha;
       s.x = s._rx;
       s.y = s._ry;
-      
+
       s._lastSeen = now;
     }
 

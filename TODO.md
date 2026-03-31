@@ -5,13 +5,13 @@
 - [ ] Chests where you can store items and resources so you dont lose them on death
 - [ ] Bosses
 - [ ] Events and Quests
-- [ ] More Players Per Server (Dont worry the map will be larger)
+- [-] More Players Per Server (Dont worry the map will be larger)
 - [ ] Spike Damage is now based on velocity (This fixes the pit trap spike problem)
 - [ ] More Weapons and Armor
 - [ ] New Animals and Improved AI
 - [ ] New Buildings, Turrets & Traps
 - [ ] Improved Graphics
-- [ ] Bigger Map with more Biomes
+- [-] Bigger Map with more Biomes
 - [ ] Place Objects anywhere and push them out from center if you build inside of another (easier to connect buildings)
 - [ ] More Challenge Icons (Currently MooMoo only has the skull for most kills)
 - [ ] More Tribe features like: Trading and Assigning Roles
@@ -44,4 +44,10 @@
 
 by 'disconnect' i mean blacklist their ip for a day
 
-- [ ] add computationally expensive barriers, forcing use of wasm (skids cant use wasm yet)
+- [-] add computationally expensive barriers, forcing use of wasm (skids cant use wasm yet)
+
+- [ ] voice chat
+
+
+aaa new
+make fishes push, no force push

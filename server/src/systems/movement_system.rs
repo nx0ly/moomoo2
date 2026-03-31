@@ -6,6 +6,7 @@ use shared::structs::server::Player;
 const PLAYER_MAX_SPEED: f32 = 45.0;
 const PLAYER_ACCEL: f32 = 120.0;
 const PLAYER_FRICTION: f32 = 90.0;
+const SNOW_FRICTION: f32 = 6.7;
 const DT: f32 = 0.45;
 
 pub fn movement_system(
@@ -37,7 +38,13 @@ pub fn movement_system(
         } else {
             // friction when no input
             let speed = (vx * vx + vy * vy).sqrt();
-            let drop = PLAYER_FRICTION * dt;
+            let mut drop = 0_f32;
+
+            if pos.x < 4096. {
+                drop = SNOW_FRICTION * dt;
+            } else {
+                drop = PLAYER_FRICTION * dt;
+            }
 
             if speed > drop {
                 vx -= vx / speed * drop;

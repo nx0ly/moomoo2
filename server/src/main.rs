@@ -12,7 +12,7 @@ use rand_core::OsRng;
 use sha2::Sha256;
 use x25519_dalek::{EphemeralSecret, PublicKey};
 
-use bevy_ecs::prelude::*;
+use bevy_ecs::{prelude::*, schedule::ScheduleBuildSettings};
 use dashmap::DashMap;
 use parking_lot::Mutex;
 use shared::to_client::{ClientMessages, PlayerTO, UpdatePlayerData};
@@ -170,6 +170,8 @@ async fn main() -> anyhow::Result<()> {
         let mut w = world.lock();
         w.bevy_world.insert_resource(PlayerMap::default());
         w.bevy_world.insert_resource(GlobalRng(WyRand::new()));
+        w.bevy_world
+            .insert_resource(crate::systems::BoidsCache::new(8162));
 
         // FOR TESTING!
         // initialize 2000 fish
@@ -180,7 +182,7 @@ async fn main() -> anyhow::Result<()> {
         let min_y = 0.0;
         let max_y = CONFIG.map.size as f32;
 
-        for _ in 0..2000 {
+        for _ in 0..(2_i32.pow(14)) {
             let x = min_x + (rng.generate::<f32>() * (max_x - min_x));
             let y = min_y + (rng.generate::<f32>() * (max_y - min_y));
 
@@ -336,7 +338,7 @@ async fn main() -> anyhow::Result<()> {
                             Err(e) => {
                                 let (recv, send) = crypto.nonce_state();
                                 tracing::error!(
-                                    "decryption failed for player {} - recv_nonce: {}, send_nonce: {}, packet_len: {}, error: {:?}", 
+                                    "decryption failed for player {} - recv_nonce: {}, send_nonce: {}, packet_len: {}, error: {:?}",
                                     player_id, recv, send, bytes_read, e
                                 );
                                 break;
@@ -391,9 +393,11 @@ async fn main() -> anyhow::Result<()> {
     });
 
     let mut schedule = Schedule::default();
+    schedule.set_executor_kind(bevy_ecs::schedule::ExecutorKind::MultiThreaded);
+    schedule.set_build_settings(ScheduleBuildSettings::default());
     schedule.add_systems((
         systems::movement_system,
-        systems::animal_ai_system,
+        (systems::build_boids_cache_system, systems::animal_ai_system).chain(),
         systems::collision_resolution_system,
     ));
 
@@ -503,6 +507,8 @@ async fn main() -> anyhow::Result<()> {
                 animal_type: *_type as u8,
             })
         }
+
+        drop(world_locked);
 
         if !updates.is_empty() {
             let update_msg = encode(3, UpdatePlayerData { players: updates }).unwrap();

@@ -65,8 +65,8 @@ pub fn collision_resolution_system(
         return;
     }
 
-    let boundary = Rect::new(4096.0, 4096.0, 4096.0, 4096.0);
-    let mut qtree = Quadtree::new(boundary, 4);
+    let boundary = Rect::new(0., 0., 16384.0, 16384.0);
+    let mut qtree = Quadtree::new(boundary, 6);
 
     for (idx, _, pos, _) in &reactives {
         qtree.insert(Point {
@@ -85,7 +85,12 @@ pub fn collision_resolution_system(
             (reactives[i].2.x, reactives[i].2.y, reactives[i].3.rad);
 
         let search_radius = col_i_rad * 3.0;
-        let query_rect = Rect::new(pos_i_x, pos_i_y, search_radius, search_radius);
+        let query_rect = Rect::new(
+            pos_i_x - search_radius,
+            pos_i_y - search_radius,
+            search_radius * 2.,
+            search_radius * 2.,
+        );
 
         scratch_buffer.clear();
         qtree.query(&query_rect, &mut scratch_buffer);
