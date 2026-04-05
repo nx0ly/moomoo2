@@ -21,7 +21,7 @@ impl PlayerConnection {
         &mut self,
         plaintext: &[u8],
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let ciphertext = self.crypto.encrypt(plaintext).unwrap();
+let ciphertext = self.crypto.encrypt(plaintext).map_err(|e| format!("encrypt failed: {e}"))?;
 
         let len_bytes = (ciphertext.len() as u32).to_be_bytes();
         self.stream.write_all(&len_bytes).await?;

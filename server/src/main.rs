@@ -8,6 +8,9 @@ use chacha20poly1305::{
     ChaCha20Poly1305, Key, Nonce,
 };
 
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+struct CollisionSet;
+
 use rand_core::OsRng;
 use sha2::Sha256;
 use x25519_dalek::{EphemeralSecret, PublicKey};
@@ -16,10 +19,10 @@ use bevy_ecs::{prelude::*, schedule::ScheduleBuildSettings};
 use dashmap::DashMap;
 use parking_lot::Mutex;
 use shared::to_client::{ClientMessages, PlayerTO, UpdatePlayerData};
-use shared::to_server::{MoveMessage, SpawnMessage};
+use shared::to_server::{AimMessage, MoveMessage, SpawnMessage};
 use shared::PacketType;
 use shared::{
-    structs::server::{Move, Player},
+    structs::server::{Aim, Move, Player},
     to_client::{AddAnimalData, AnimalTO},
 };
 use tokio::sync::mpsc as god;
@@ -36,7 +39,10 @@ use crate::{
     errors::{GameError, InternalGameMessages},
     structs::{
         bevy::{IDToConnection, PlayerConnection, PlayerMap, World},
-        components::{spawn_wall, AiState, AiTarget, AnimalEntity, AnimalType, Position, Velocity},
+        components::{
+            spawn_wall, AiState, AiTarget, AimDir, AnimalEntity, AnimalType, Health, MoveDir, Name,
+            PlayerBundle, PlayerEntity, Position, Resources, Velocity,
+        },
     },
     systems::{GlobalRng, ReactiveCollider},
 };
@@ -114,12 +120,12 @@ async fn perform_handshake(
     let server_secret = EphemeralSecret::random_from_rng(OsRng);
     let server_public = PublicKey::from(&server_secret);
 
-    let mut buf = vec![0u8; 4096];
-    let len = recv
-        .read(&mut buf)
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("stream closed during handshake"))?;
-    let client_hello: ClientHello = borsh::from_slice(&buf[..len])?;
+    let mut len_buf = [0u8; 4];
+    recv.read_exact(&mut len_buf).await?;
+    let msg_len = u32::from_be_bytes(len_buf) as usize;
+    let mut buf = vec![0u8; msg_len];
+    recv.read_exact(&mut buf).await?;
+    let client_hello: ClientHello = borsh::from_slice(&buf)?;
 
     let client_x25519_pk = PublicKey::from(client_hello.x25519_pk);
     let x25519_shared_secret = server_secret.diffie_hellman(&client_x25519_pk);
@@ -144,10 +150,10 @@ async fn perform_handshake(
         x25519_pk: *server_public.as_bytes(),
         kyber_ct: kyber_ciphertext.to_vec(),
     };
-
     let response_bytes = borsh::to_vec(&server_hello)?;
+    let len_bytes = (response_bytes.len() as u32).to_be_bytes();
+    send.write_all(&len_bytes).await?;
     send.write_all(&response_bytes).await?;
-
     tracing::info!("handshake complete - session encrypted");
 
     Ok(SessionCrypto::new(session_key))
@@ -170,9 +176,9 @@ async fn main() -> anyhow::Result<()> {
         let mut w = world.lock();
         w.bevy_world.insert_resource(PlayerMap::default());
         w.bevy_world.insert_resource(GlobalRng(WyRand::new()));
-        w.bevy_world
-            .insert_resource(crate::systems::BoidsCache::new(8162));
-
+        // w.bevy_world
+        //     .insert_resource(crate::systems::BoidsCache::new(8162));
+        //
         // FOR TESTING!
         // initialize 2000 fish
         let mut rng = WyRand::new();
@@ -182,22 +188,22 @@ async fn main() -> anyhow::Result<()> {
         let min_y = 0.0;
         let max_y = CONFIG.map.size as f32;
 
-        for _ in 0..(2_i32.pow(14)) {
+        for _ in 0..(2_i32.pow(12)) {
             let x = min_x + (rng.generate::<f32>() * (max_x - min_x));
             let y = min_y + (rng.generate::<f32>() * (max_y - min_y));
 
             w.bevy_world.spawn((
-                Position { x, y },
-                Velocity {
-                    vx: (rng.generate::<f32>() - 0.5) * 50.0,
-                    vy: (rng.generate::<f32>() - 0.5) * 50.0,
-                },
+                Position(x, y),
+                Velocity(
+                    (rng.generate::<f32>() - 0.5) * 50.0,
+                    (rng.generate::<f32>() - 0.5) * 50.0,
+                ),
                 AiState::Wander,
-                AiTarget {
-                    x: x + (rng.generate::<f32>() - 0.5) * 100.0,
-                    y: y + (rng.generate::<f32>() - 0.5) * 100.0,
-                    target: None,
-                },
+                AiTarget(
+                    None,
+                    x + (rng.generate::<f32>() - 0.5) * 100.0,
+                    y + (rng.generate::<f32>() - 0.5) * 100.0,
+                ),
                 AnimalType::Fish,
                 AnimalEntity,
                 Collider::circle(35.0),
@@ -207,32 +213,26 @@ async fn main() -> anyhow::Result<()> {
         // initialize wall boundary colliders
 
         w.bevy_world.spawn((
-            Position { x: 8192., y: 0. },
-            Collider::rect(8192., 10.),
+            Position(8192., 0.),
+            Collider::rect(8192., 67.),
             NonReactiveCollider,
         ));
 
         w.bevy_world.spawn((
-            Position {
-                x: 8192.,
-                y: 16384.,
-            },
-            Collider::rect(8192., 10.),
+            Position(8192., 16384.),
+            Collider::rect(8192., 67.),
             NonReactiveCollider,
         ));
 
         w.bevy_world.spawn((
-            Position { x: 0., y: 8192. },
-            Collider::rect(10., 8192.),
+            Position(0., 8192.),
+            Collider::rect(67., 8192.),
             NonReactiveCollider,
         ));
 
         w.bevy_world.spawn((
-            Position {
-                x: 16384.,
-                y: 8192.,
-            },
-            Collider::rect(10., 8192.),
+            Position(16384., 8192.),
+            Collider::rect(67., 8192.),
             NonReactiveCollider,
         ));
     }
@@ -311,35 +311,36 @@ async fn main() -> anyhow::Result<()> {
                         ))),
                     );
 
-                    let mut read_buf = [0u8; 4096];
-
                     loop {
-                        let bytes_read = match recv_stream.read(&mut read_buf).await {
-                            Ok(Some(n)) => n,
-                            Ok(None) => {
-                                tracing::info!("player {} stream closed normally", player_id);
-                                break;
-                            }
-                            Err(e) => {
-                                tracing::error!(
-                                    "stream read error for player {}: {:?}",
-                                    player_id,
-                                    e
-                                );
-                                break;
-                            }
-                        };
-
-                        if bytes_read == 0 {
-                            continue;
+                        let mut len_buf = [0u8; 4];
+                        if recv_stream.read_exact(&mut len_buf).await.is_err() {
+                            tracing::info!("player {} disconnected", player_id);
+                            break;
                         }
-                        let plaintext = match crypto.decrypt(&read_buf[..bytes_read]) {
+                        let msg_len = u32::from_be_bytes(len_buf) as usize;
+
+                        if msg_len == 0 || msg_len > 65536 {
+                            tracing::warn!(
+                                "player {} sent invalid message length {}",
+                                player_id,
+                                msg_len
+                            );
+                            break;
+                        }
+
+                        let mut msg_buf = vec![0u8; msg_len];
+                        if recv_stream.read_exact(&mut msg_buf).await.is_err() {
+                            tracing::info!("player {} disconnected mid-packet", player_id);
+                            break;
+                        }
+
+                        let plaintext = match crypto.decrypt(&msg_buf) {
                             Ok(p) => p,
                             Err(e) => {
                                 let (recv, send) = crypto.nonce_state();
                                 tracing::error!(
-                                    "decryption failed for player {} - recv_nonce: {}, send_nonce: {}, packet_len: {}, error: {:?}",
-                                    player_id, recv, send, bytes_read, e
+                                    "decryption failed for player {} - recv_nonce: {}, send_nonce: {}, error: {:?}",
+                                    player_id, recv, send, e
                                 );
                                 break;
                             }
@@ -362,6 +363,7 @@ async fn main() -> anyhow::Result<()> {
                                                 y: 10000.,
                                                 id: player_id,
                                                 move_dir: None,
+                                                aim: 0.0,
                                                 vx: 0.0,
                                                 vy: 0.0,
                                                 attacked: false,
@@ -383,6 +385,16 @@ async fn main() -> anyhow::Result<()> {
                                         .await;
                                 }
                             }
+                            Some(PacketType::Aim) => {
+                                if let Ok(data) = decode::<AimMessage>(&plaintext[1..]) {
+                                    let _ = game_tx
+                                        .send((
+                                            player_id,
+                                            InternalGameMessages::AimPlayer(Aim { dir: data.dir }),
+                                        ))
+                                        .await;
+                                }
+                            }
                             _ => {}
                         }
                     }
@@ -395,12 +407,20 @@ async fn main() -> anyhow::Result<()> {
     let mut schedule = Schedule::default();
     schedule.set_executor_kind(bevy_ecs::schedule::ExecutorKind::MultiThreaded);
     schedule.set_build_settings(ScheduleBuildSettings::default());
-    schedule.add_systems((
-        systems::movement_system,
-        (systems::build_boids_cache_system, systems::animal_ai_system).chain(),
-        systems::collision_resolution_system,
-    ));
+    // schedule.add_systems((
+    //     systems::movement_system,
+    //     systems::animal_ai_system,
+    //     systems::collision_resolution_system,
+    // ));
 
+    schedule.add_systems(
+        (systems::movement_system, systems::animal_ai_system)
+            // these two run in parallel
+            .before(CollisionSet),
+    );
+
+    schedule.add_systems(systems::collision_resolution_system.in_set(CollisionSet));
+    /*
     let mut interval = tokio::time::interval(Duration::from_millis(67));
     loop {
         interval.tick().await;
@@ -468,6 +488,13 @@ async fn main() -> anyhow::Result<()> {
                         }
                     }
                 }
+                InternalGameMessages::AimPlayer(a) => {
+                    if let Some(&e) = bevy.resource::<PlayerMap>().map.get(&id) {
+                        if let Some(mut p) = bevy.get_mut::<Player>(e) {
+                            p.aim = a.dir.unwrap();
+                        }
+                    }
+                }
                 InternalGameMessages::Disconnect => {
                     if let Some(e) = bevy.resource_mut::<PlayerMap>().map.remove(&id) {
                         if let Some(p) = bevy.get::<Player>(e) {
@@ -526,6 +553,210 @@ async fn main() -> anyhow::Result<()> {
             World::broadcast(&update_msg, &player_connections).await;
         }
     }
+
+    */
+
+    let rt_handle = tokio::runtime::Handle::current();
+
+    std::thread::spawn({
+        let world = world.clone();
+        let player_connections = player_connections.clone();
+        move || {
+            let tick = Duration::from_millis(67);
+            loop {
+                let start = std::time::Instant::now();
+
+                let mut world_locked = world.lock();
+                let bevy = &mut world_locked.bevy_world;
+
+                while let Ok((id, msg)) = input_rx.try_recv() {
+                    match msg {
+                        InternalGameMessages::AddPlayer(p) => {
+                            // tell the new player about all existing players
+                            let entities: Vec<(u8, Entity)> = {
+                                let player_map = bevy.resource::<PlayerMap>();
+                                player_map.map.iter().map(|e| (*e.0, *e.1)).collect()
+                            };
+
+                            for (existing_id, entity) in entities {
+                                if let (Some(name), Some(pos), Some(aim)) = (
+                                    bevy.get::<Name>(entity),
+                                    bevy.get::<Position>(entity),
+                                    bevy.get::<AimDir>(entity),
+                                ) {
+                                    let msg = encode(
+                                        1,
+                                        ClientMessages::AddPlayer(
+                                            shared::to_client::AddPlayerData {
+                                                is_mine: false,
+                                                data: PlayerTO {
+                                                    id: existing_id,
+                                                    name: name.0.clone(),
+                                                    x: pos.0,
+                                                    y: pos.1,
+                                                    aim: aim.0,
+                                                    weapon_index: Some(0),
+                                                },
+                                            },
+                                        ),
+                                    )
+                                    .unwrap();
+                                    rt_handle.block_on(World::send_to(
+                                        id,
+                                        &msg,
+                                        &player_connections,
+                                    ));
+                                }
+                            }
+
+                            // spawn the new player entity
+                            use crate::systems::{Collider, ReactiveCollider};
+                            let entity = bevy
+                                .spawn(PlayerBundle(
+                                    PlayerEntity,
+                                    Name(p.name.clone()),
+                                    Position(p.x, p.y),
+                                    Velocity(p.vx, p.vy),
+                                    MoveDir(None),
+                                    AimDir(0.0),
+                                    Health(100., 100.),
+                                    Resources(100, 100, 100, 100, 0),
+                                    Collider::circle(35.),
+                                    ReactiveCollider,
+                                ))
+                                .id();
+                            bevy.resource_mut::<PlayerMap>().map.insert(id, entity);
+
+                            // tell the new player about themselves
+                            let spawn_self = encode(
+                                1,
+                                ClientMessages::AddPlayer(shared::to_client::AddPlayerData {
+                                    is_mine: true,
+                                    data: PlayerTO {
+                                        id,
+                                        name: p.name.clone(),
+                                        x: p.x,
+                                        y: p.y,
+                                        aim: 0.0,
+                                        weapon_index: Some(0),
+                                    },
+                                }),
+                            )
+                            .unwrap();
+                            rt_handle.block_on(World::send_to(
+                                id,
+                                &spawn_self,
+                                &player_connections,
+                            ));
+
+                            // tell all existing players about the new player
+                            let spawn_other = encode(
+                                1,
+                                ClientMessages::AddPlayer(shared::to_client::AddPlayerData {
+                                    is_mine: false,
+                                    data: PlayerTO {
+                                        id,
+                                        name: p.name.clone(),
+                                        x: p.x,
+                                        y: p.y,
+                                        aim: 0.0,
+                                        weapon_index: Some(0),
+                                    },
+                                }),
+                            )
+                            .unwrap();
+                            rt_handle.block_on(World::broadcast_with_exceptions(
+                                &[id],
+                                &spawn_other,
+                                &player_connections,
+                            ));
+                        }
+                        InternalGameMessages::MovePlayer(m) => {
+                            if let Some(&e) = bevy.resource::<PlayerMap>().map.get(&id) {
+                                if let Some(mut move_dir) = bevy.get_mut::<MoveDir>(e) {
+                                    move_dir.0 = m.dir;
+                                }
+                            }
+                        }
+
+                        InternalGameMessages::AimPlayer(a) => {
+                            if let Some(&e) = bevy.resource::<PlayerMap>().map.get(&id) {
+                                if let Some(mut aim_dir) = bevy.get_mut::<AimDir>(e) {
+                                    aim_dir.0 = a.dir.unwrap_or(0.0);
+                                }
+                            }
+                        }
+                        InternalGameMessages::Disconnect => {
+                            if let Some(e) = bevy.resource_mut::<PlayerMap>().map.remove(&id) {
+                                if let Some(p) = bevy.get::<Player>(e) {
+                                    tracing::info!("player {} ({}) gone", p.name, id);
+                                }
+                                bevy.despawn(e);
+                            }
+                        }
+                    }
+                }
+
+                schedule.run(bevy);
+
+                let player_map = bevy.resource::<PlayerMap>();
+                let mut updates = Vec::new();
+                for (i, &entity) in player_map.map.iter() {
+                    if let (Some(name), Some(pos), Some(aim)) = (
+                        bevy.get::<Name>(entity),
+                        bevy.get::<Position>(entity),
+                        bevy.get::<AimDir>(entity),
+                    ) {
+                        updates.push(PlayerTO {
+                            id: *i,
+                            name: name.0.clone(),
+                            x: pos.0,
+                            y: pos.1,
+                            aim: aim.0,
+                            weapon_index: Some(0),
+                        });
+                    }
+                }
+
+                let mut animal_updates = Vec::new();
+                let mut animal_query = bevy.query::<(Entity, &Position, &AnimalType)>();
+                let iterator = animal_query.iter(&world_locked.bevy_world);
+                for (entity, pos, _type) in iterator {
+                    animal_updates.push(AnimalTO {
+                        id: entity.index(),
+                        x: pos.0,
+                        y: pos.1,
+                        animal_type: *_type as u8,
+                    })
+                }
+
+                drop(world_locked);
+
+                if !updates.is_empty() {
+                    let update_msg = encode(3, UpdatePlayerData { players: updates }).unwrap();
+                    rt_handle.block_on(World::broadcast(&update_msg, &player_connections));
+                }
+
+                if !animal_updates.is_empty() {
+                    let update_msg = encode(
+                        4,
+                        AddAnimalData {
+                            animals: animal_updates,
+                        },
+                    )
+                    .unwrap();
+                    rt_handle.block_on(World::broadcast(&update_msg, &player_connections));
+                }
+
+                if let Some(remaining) = tick.checked_sub(start.elapsed()) {
+                    std::thread::sleep(remaining);
+                }
+            }
+        }
+    });
+
+    // keep the tokio runtime alive
+    Ok(std::future::pending::<()>().await)
 }
 
 pub fn decode<T: borsh::BorshDeserialize>(buf: &[u8]) -> Result<T, GameError> {

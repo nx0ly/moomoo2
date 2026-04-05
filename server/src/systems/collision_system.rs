@@ -70,8 +70,8 @@ pub fn collision_resolution_system(
 
     for (idx, _, pos, _) in &reactives {
         qtree.insert(Point {
-            x: pos.x,
-            y: pos.y,
+            x: pos.0,
+            y: pos.1,
             index: *idx,
         });
     }
@@ -82,7 +82,7 @@ pub fn collision_resolution_system(
     // reactive vs reactive
     for i in 0..reactives.len() {
         let (pos_i_x, pos_i_y, col_i_rad) =
-            (reactives[i].2.x, reactives[i].2.y, reactives[i].3.rad);
+            (reactives[i].2.0, reactives[i].2.1, reactives[i].3.rad);
 
         let search_radius = col_i_rad * 3.0;
         let query_rect = Rect::new(
@@ -112,13 +112,13 @@ pub fn collision_resolution_system(
                 let p2 = &mut (*ptr.add(j)).2;
                 let c2 = &(*ptr.add(j)).3;
 
-                let dx = p2.x - p1.x;
-                let dy = p2.y - p1.y;
+                let dx = p2.0 - p1.0;
+                let dy = p2.1 - p1.1;
                 let combined_rad = c1.rad + c2.rad;
 
                 if dx * dx + dy * dy < combined_rad * combined_rad {
-                    let iso1 = Isometry::translation(p1.x, p1.y);
-                    let iso2 = Isometry::translation(p2.x, p2.y);
+                    let iso1 = Isometry::translation(p1.0, p1.1);
+                    let iso2 = Isometry::translation(p2.0, p2.1);
 
                     if let Ok(Some(contact)) = contact(
                         &iso1,
@@ -131,10 +131,10 @@ pub fn collision_resolution_system(
                             let normal = contact.normal1;
                             let separation = contact.dist.abs() * 0.5;
 
-                            p1.x -= normal.x * separation;
-                            p1.y -= normal.y * separation;
-                            p2.x += normal.x * separation;
-                            p2.y += normal.y * separation;
+                            p1.0 -= normal.x * separation;
+                            p1.1 -= normal.y * separation;
+                            p2.0 += normal.x * separation;
+                            p2.1 += normal.y * separation;
                         }
                     }
                 }
@@ -145,13 +145,13 @@ pub fn collision_resolution_system(
     // reactive vs non reactive
     for (_, mut pos, col) in reactive_query.iter_mut() {
         for (wall_pos, wall_col) in non_reactive_query.iter() {
-            let dx = wall_pos.x - pos.x;
-            let dy = wall_pos.y - pos.y;
+            let dx = wall_pos.0 - pos.0;
+            let dy = wall_pos.1 - pos.1;
             let combined_rad = col.rad + wall_col.rad;
 
             if dx * dx + dy * dy < combined_rad * combined_rad {
-                let iso_a = Isometry::translation(pos.x, pos.y);
-                let iso_b = Isometry::translation(wall_pos.x, wall_pos.y);
+                let iso_a = Isometry::translation(pos.0, pos.1);
+                let iso_b = Isometry::translation(wall_pos.0, wall_pos.1);
 
                 if let Ok(Some(contact)) = contact(
                     &iso_a,
@@ -162,8 +162,8 @@ pub fn collision_resolution_system(
                 ) {
                     if contact.dist < 0.0 {
                         let normal = contact.normal1;
-                        pos.x -= normal.x * contact.dist.abs();
-                        pos.y -= normal.y * contact.dist.abs();
+                        pos.0 -= normal.x * contact.dist.abs();
+                        pos.1 -= normal.y * contact.dist.abs();
                     }
                 }
             }

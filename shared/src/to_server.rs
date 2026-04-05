@@ -13,6 +13,13 @@ pub struct MoveMessage {
     pub dir: Option<f32>,
 }
 
+
+#[derive(Debug, Clone, BorshDeserialize, BorshSerialize)]
+#[cfg_attr(feature = "web", derive(Serialize, Deserialize))]
+pub struct AimMessage {
+    pub dir: Option<f32>, 
+}
+
 #[derive(Debug, Clone, BorshDeserialize, BorshSerialize)]
 #[cfg_attr(feature = "web", derive(Serialize, Deserialize))]
 pub struct ChatMessage {
@@ -22,5 +29,6 @@ pub struct ChatMessage {
 pub enum ClientMessages {
     SpawnMessage,
     MoveMessage,
+    AimMessage,
     ChatMessage
 }

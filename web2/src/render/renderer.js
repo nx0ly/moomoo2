@@ -1,8 +1,7 @@
-import { Application, Assets, Container, Graphics, Sprite } from "pixi.js";
+import { Application, Assets, Container, Graphics, Sprite, Text, TextStyle } from "pixi.js";
 import Camera from "../objects/camera";
 import PlayerSVG from "../assets/head.png";
 import FishPNG from "../assets/fish_1.png";
-
 export class Render {
   constructor(game) {
     this.game = game;
@@ -29,6 +28,20 @@ export class Render {
     this.textures = {};
     this.animals = [];
 
+    this.nameTextStyle = new TextStyle({
+        fontSize: 20,
+        fontFamily: "GameFont",
+        fontWeight: "normal",
+        fill: "#fff",
+        stroke: {
+          color: "#454545",
+          width: 6.7,
+          join: "round"
+        },
+        align: "center",
+        letterSpacing: 0.67
+    })
+
     this.lastCleanupTime = 0;
     this.cleanupInterval = 1000;
 
@@ -37,7 +50,7 @@ export class Render {
 
   drawGrid(ctx, width, height, size) {
     ctx.clear();
-    
+
     const lineStyle = { width: 4, color: 0x000000, alpha: 0.06 };
 
     for (let x = 0; x <= width; x += size) {
@@ -59,6 +72,7 @@ export class Render {
 
     const playerAsset = await Assets.load(PlayerSVG);
     const fishAsset = await Assets.load(FishPNG);
+    await Assets.load({ src: "/src/assets/game_font.ttf", data: { family: "GameFont" } });
 
     this.textures.player_texture = playerAsset;
     this.textures.fish_texture = fishAsset;
@@ -68,72 +82,107 @@ export class Render {
     this.app.ticker.add(this.draw);
   }
 
+  // draw loop
   draw = (ticker) => {
+    // get my player and abort i i haven't spawned yet
     const myPlayer = this.game?.my_player;
     if (!myPlayer) return;
 
+    // times
     const now = performance.now();
     const delta = ticker.deltaMS * 0.001;
     const interpolationAlpha = 1 - Math.pow(0.67, delta / 0.067);
 
+    // camera movement
     const camDx = myPlayer.x - this.camera.x;
     const camDy = myPlayer.y - this.camera.y;
-    this.camera.x += camDx * delta;
-    this.camera.y += camDy * delta;
+    const camDist = Math.hypot(camDy, camDx);
+
+    this.camera.x += camDx * Math.min(0.05, camDist * 0.05 * delta);
+    this.camera.y += camDy * Math.min(0.05, camDist * 0.05 * delta);
 
     this.world.x = (this.app.screen.width >> 1) - this.camera.x;
     this.world.y = (this.app.screen.height >> 1) - this.camera.y;
 
-    const players = this.game.players;
-    for (let i = 0; i < players.length; i++) {
-      const p = players[i];
-      let s = this.player_id_to_sprite[p.id];
+    // update player positions
+    for (let i = 0; i < this.game.players.length; i++) {
+      const player = this.game.players[i];
+      let is_mine = player.id == this.game.my_player.id;
+      let sprite = this.player_id_to_sprite[player.id];
 
-      if (!s) {
-        s = new Sprite(this.textures.player_texture);
-        s.anchor.set(0.5);
-        s.width = s.height = 70;
-        this.player_id_to_sprite[p.id] = s;
-        this.world.addChild(s);
-        s._rx = p.x;
-        s._ry = p.y;
+      // create new texture
+      if (!sprite) {
+        sprite = new Sprite(this.textures.player_texture);
+
+        sprite.anchor.set(0.5);
+        sprite.width = sprite.height = 70;
+
+        const label = new Text({ text: player.name, style: this.nameTextStyle });
+        label.anchor.set(0.5, 1);
+        sprite._label = label;
+
+        this.player_id_to_sprite[player.id] = sprite;
+        this.world.addChild(sprite);
+        this.world.addChild(label);
+
+        sprite._rx = player.x;
+        sprite._ry = player.y;
       }
 
-      s._rx += (p.x - s._rx) * interpolationAlpha;
-      s._ry += (p.y - s._ry) * interpolationAlpha;
-      s.x = s._rx;
-      s.y = s._ry;
+      // rotate
+      sprite.rotation = is_mine ? this.game.lastAimDir : player.visualAim;
+
+      // interpolate
+      sprite._rx += (player.x - sprite._rx) * interpolationAlpha;
+      sprite._ry += (player.y - sprite._ry) * interpolationAlpha;
+      sprite.x = sprite._rx;
+      sprite.y = sprite._ry;
+
+      if (sprite._label) {
+        sprite._label.x = sprite._rx;
+        sprite._label.y = sprite._ry - 40;
+      }
+
+      let aimDelta = player.aim - player.visualAim;
+      if (aimDelta > Math.PI) aimDelta -= Math.PI * 2;
+      if (aimDelta < -Math.PI) aimDelta += Math.PI * 2;
+      player.visualAim += aimDelta * interpolationAlpha;
     }
 
-    for (let i = 0; i < this.animals.length; i++) {
-      const a = this.animals[i];
-      let s = this.animal_id_to_sprite[a.sid];
+    // update animal positions
+    for (let i = 0; i < this.game.animals.length; i++) {
+      const animal = this.game.animals[i];
+      let sprite = this.animal_id_to_sprite[animal.sid];
 
-      if (!s) {
-        s = new Sprite(this.textures.fish_texture);
-        s.anchor.set(0.5);
+      // create new texture
+      if (!sprite) {
+        sprite = new Sprite(this.textures.fish_texture);
 
-        s.width = s.height = 128;
+        sprite.anchor.set(0.5);
+        sprite.width = sprite.height = 128;
 
-        s._rx = a.x;
-        s._ry = a.y;
-        this.animal_id_to_sprite[a.sid] = s;
-        this.world.addChild(s);
+        sprite._rx = animal.x;
+        sprite._ry = animal.y;
+
+        this.animal_id_to_sprite[animal.sid] = sprite;
+        this.world.addChild(sprite);
       }
 
-      const dx = a.x - s.x;
-      const dy = a.y - s.y;
+      // rotate animal to its movement
+      const dx = animal.x - sprite._rx;
+      const dy = animal.y - sprite._ry;
 
       if (Math.abs(dx) > 0.1 || Math.abs(dy) > 0.1) {
-        s.rotation = Math.atan2(dy, dx) - Math.PI / 2;
+        sprite.rotation = Math.atan2(dy, dx) - Math.PI / 2;
       }
 
-      s._rx += (a.x - s._rx) * interpolationAlpha;
-      s._ry += (a.y - s._ry) * interpolationAlpha;
-      s.x = s._rx;
-      s.y = s._ry;
+      sprite._rx += (animal.x - sprite._rx) * interpolationAlpha;
+      sprite._ry += (animal.y - sprite._ry) * interpolationAlpha;
 
-      s._lastSeen = now;
+      sprite.x = sprite._rx;
+      sprite.y = sprite._ry;
+
+      sprite._lastSeen = now;
     }
 
     if (now - this.lastCleanupTime > this.cleanupInterval) {

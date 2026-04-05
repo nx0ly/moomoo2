@@ -1,18 +1,14 @@
-use bevy_ecs::{component::Component, entity::Entity};
+use bevy_ecs::{bundle::Bundle, component::Component, entity::Entity};
 
-use crate::structs::bevy;
-
-#[derive(Component, Clone, Copy, Debug)]
-pub struct Position {
-    pub x: f32,
-    pub y: f32,
-}
+use crate::{structs::bevy, systems::{Collider, ReactiveCollider}};
 
 #[derive(Component, Clone, Copy, Debug)]
-pub struct Velocity {
-    pub vx: f32,
-    pub vy: f32,
-}
+// x, y
+pub struct Position(pub f32, pub f32);
+
+#[derive(Component, Clone, Copy, Debug)]
+// vx, vy
+pub struct Velocity(pub f32, pub f32);
 
 #[derive(Component, Clone, Debug)]
 pub struct Name(pub String);
@@ -27,7 +23,14 @@ pub struct PlayerEntity;
 pub struct AnimalEntity;
 
 #[derive(Component)]
-pub struct Resource;
+// wood, stone, berry, gold, kills
+pub struct Resources(pub u32, pub u32, pub u32, pub u32, pub u32);
+
+#[derive(Component)]
+pub struct MoveDir(pub Option<f32>);
+
+#[derive(Component)]
+pub struct AimDir(pub f32);
 
 #[derive(Component, Clone, Copy, Debug)]
 pub enum AnimalType {
@@ -36,10 +39,8 @@ pub enum AnimalType {
 }
 
 #[derive(Component, Clone, Copy, Debug)]
-pub struct Health {
-    pub current: f32,
-    pub max: f32,
-}
+// current, max
+pub struct Health(pub f32, pub f32);
 
 // potential use in the future
 #[derive(Component, Clone, Copy, Debug)]
@@ -52,11 +53,26 @@ pub enum AiState {
 }
 
 #[derive(Component, Clone, Copy, Debug)]
-pub struct AiTarget {
-    pub target: Option<Entity>,
-    pub x: f32,
-    pub y: f32,
-}
+// target, x, y
+pub struct AiTarget (
+    pub Option<Entity>,
+    pub f32,
+    pub f32,
+);
+
+#[derive(Bundle)]
+pub struct PlayerBundle(
+    pub PlayerEntity,
+    pub Name,
+    pub Position,
+    pub Velocity,
+    pub MoveDir,
+    pub AimDir,
+    pub Health,
+    pub Resources,
+    pub Collider,
+    pub ReactiveCollider,
+);
 
 pub fn spawn_wall(
     commands: &mut bevy_ecs::world::World,
@@ -69,7 +85,7 @@ pub fn spawn_wall(
 
     commands
         .spawn((
-            Position { x, y },
+            Position(x, y),
             Collider::rect(half_width, half_height),
             NonReactiveCollider,
             Wall,
@@ -93,18 +109,15 @@ pub fn spawn_animal(
 
     commands
         .spawn((
-            Position { x, y },
-            Velocity { vx: 0.0, vy: 0.0 },
+            Position(x, y),
+            Velocity(0.0, 0.0),
             Collider::circle(radius),
             ReactiveCollider,
             AnimalEntity,
             animal_type,
-            Health {
-                current: health,
-                max: health,
-            },
+            Health(health, health),
             AiState::Idle,
-            AiTarget { target: None, x, y },
+            AiTarget(None, x, y),
             Name(format!("{:?}", animal_type)),
         ))
         .id()

@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use borsh_derive::{BorshDeserialize, BorshSerialize};
 
 #[cfg(feature = "web")]
-use crate::structs::client::JsPlayer;
+use crate::structs::client::{JsGameObject, JsPlayer};
 
 #[derive(Debug, Clone, BorshDeserialize, BorshSerialize)]
 #[cfg_attr(feature = "server", derive(Component))]
@@ -18,6 +18,7 @@ pub struct Player {
     pub x: f32,
     pub y: f32,
     pub move_dir: Option<f32>,
+    pub aim: f32,
     pub vx: f32,
     pub vy: f32,
     pub attacked: bool,
@@ -33,6 +34,7 @@ impl From<JsPlayer> for Player {
             x: value.get_x(),
             y: value.get_y(),
             move_dir: value.get_move_dir(),
+            aim: value.get_aim(),
             vx: 0.,
             vy: 0.,
             attacked: false,
@@ -41,8 +43,31 @@ impl From<JsPlayer> for Player {
     }
 }
 
+// #[derive(Debug, Clone, BorshDeserialize, BorshSerialize)]
+// #[cfg_attr(feature = "server", derive(Component))]
+// #[cfg_attr(feature = "web", derive(Serialize, Deserialize))]
+// pub struct GameObject {
+//     pub id: u32,
+//     pub x: 32,
+//     pub y: 32
+// }
+
+// #[cfg(feature = "web")]
+// impl From<JsGameObject> for GameObject {
+//     fn from(value: JsGameObject) -> Self {
+//         Self {  }
+//     }
+// }
+
 #[derive(Debug, Clone, BorshDeserialize, BorshSerialize)]
 #[cfg_attr(feature = "web", derive(Serialize, Deserialize))]
 pub struct Move {
+    pub dir: Option<f32>,
+}
+
+
+#[derive(Debug, Clone, BorshDeserialize, BorshSerialize)]
+#[cfg_attr(feature = "web", derive(Serialize, Deserialize))]
+pub struct Aim {
     pub dir: Option<f32>,
 }

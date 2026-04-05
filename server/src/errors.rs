@@ -1,4 +1,4 @@
-use shared::structs::server::{Move, Player};
+use shared::structs::server::{Aim, Move, Player};
 use thiserror::Error;
 
 /// internal game messages used to pass information around
@@ -7,6 +7,7 @@ pub enum InternalGameMessages {
     Disconnect,
     AddPlayer(Player),
     MovePlayer(Move),
+    AimPlayer(Aim),
 }
 
 #[derive(Debug, Error)]

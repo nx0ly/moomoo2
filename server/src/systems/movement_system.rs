@@ -1,6 +1,6 @@
 use bevy_ecs::prelude::*;
 
-use crate::structs::components::{PlayerEntity, Position, Velocity};
+use crate::structs::components::{MoveDir, PlayerEntity, Position, Velocity};
 use shared::structs::server::Player;
 
 const PLAYER_MAX_SPEED: f32 = 45.0;
@@ -10,15 +10,15 @@ const SNOW_FRICTION: f32 = 6.7;
 const DT: f32 = 0.45;
 
 pub fn movement_system(
-    mut query: Query<(&mut Position, &mut Velocity, &Player), With<PlayerEntity>>,
+    mut query: Query<(&mut Position, &mut Velocity, &MoveDir), With<PlayerEntity>>,
 ) {
     let dt = DT;
 
-    for (mut pos, mut vel, player) in query.iter_mut() {
-        let mut vx = vel.vx;
-        let mut vy = vel.vy;
+    for (mut pos, mut vel, move_dir) in query.iter_mut() {
+        let mut vx = vel.0;
+        let mut vy = vel.1;
 
-        if let Some(dir) = player.move_dir {
+        if let Some(dir) = move_dir.0 {
             let target_vx = dir.cos() * PLAYER_MAX_SPEED;
             let target_vy = dir.sin() * PLAYER_MAX_SPEED;
 
@@ -40,7 +40,7 @@ pub fn movement_system(
             let speed = (vx * vx + vy * vy).sqrt();
             let mut drop = 0_f32;
 
-            if pos.x < 4096. {
+            if pos.0 < 4096. {
                 drop = SNOW_FRICTION * dt;
             } else {
                 drop = PLAYER_FRICTION * dt;
@@ -55,10 +55,10 @@ pub fn movement_system(
             }
         }
 
-        vel.vx = vx;
-        vel.vy = vy;
+        vel.0 = vx;
+        vel.1 = vy;
 
-        pos.x += vx * dt;
-        pos.y += vy * dt;
+        pos.0 += vx * dt;
+        pos.1 += vy * dt;
     }
 }

@@ -16,6 +16,7 @@ pub struct PlayerTO {
     pub name: String,
     pub x: f32,
     pub y: f32,
+    pub aim: f32,
     pub weapon_index: Option<u8>,
 }
 
@@ -26,6 +27,7 @@ impl From<ServerPlayer> for PlayerTO {
             name: value.name,
             x: value.x,
             y: value.y,
+            aim: value.aim,
             weapon_index: value.weapon_index,
         }
     }

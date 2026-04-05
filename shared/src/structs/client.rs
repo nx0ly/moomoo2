@@ -1,11 +1,13 @@
 #[cfg(feature = "web")]
-use wasm_bindgen::prelude::*;
-#[cfg(feature = "web")]
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "web")]
+use wasm_bindgen::prelude::*;
 
 use borsh_derive::{BorshDeserialize, BorshSerialize};
 
-use crate::structs::server::{Player, Move};
+#[cfg(feature = "web")]
+// use crate::structs::server::GameObject;
+use crate::structs::server::{Aim, Move, Player};
 
 #[cfg(feature = "web")]
 #[wasm_bindgen]
@@ -16,7 +18,8 @@ pub struct JsPlayer {
     x: f32,
     y: f32,
     move_dir: Option<f32>,
-    weapon_index: Option<u8>
+    aim: f32,
+    weapon_index: Option<u8>,
 }
 
 #[cfg(feature = "web")]
@@ -41,6 +44,10 @@ impl JsPlayer {
         self.move_dir
     }
 
+    pub fn get_aim(&self) -> f32 {
+        self.aim
+    }
+
     pub fn get_weapon_index(&self) -> Option<u8> {
         self.weapon_index
     }
@@ -55,10 +62,30 @@ impl From<Player> for JsPlayer {
             x: value.x,
             y: value.y,
             move_dir: value.move_dir,
-            weapon_index: value.weapon_index
+            aim: value.aim,
+            weapon_index: value.weapon_index,
         }
     }
 }
+
+#[cfg(feature = "web")]
+#[wasm_bindgen]
+#[derive(BorshSerialize, Deserialize, Serialize, BorshDeserialize)]
+pub struct JsGameObject {
+
+}
+
+#[cfg(feature = "web")]
+impl JsGameObject {
+    
+}
+
+// #[cfg(feature = "web")]
+// impl From<GameObject> for JsGameObject {
+//     fn from(value: GameObject) -> Self {
+//         Self {}
+//     }
+// }
 
 #[cfg(feature = "web")]
 #[wasm_bindgen]
@@ -70,6 +97,20 @@ pub struct JsMove {
 #[cfg(feature = "web")]
 impl From<Move> for JsMove {
     fn from(value: Move) -> Self {
+        Self { dir: value.dir }
+    }
+}
+
+#[cfg(feature = "web")]
+#[wasm_bindgen]
+#[derive(BorshSerialize, Deserialize, Serialize)]
+pub struct JsAim {
+    dir: Option<f32>,
+}
+
+#[cfg(feature = "web")]
+impl From<Aim> for JsAim {
+    fn from(value: Aim) -> Self {
         Self { dir: value.dir }
     }
 }
