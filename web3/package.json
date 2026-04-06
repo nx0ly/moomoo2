@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "minify": "node build.js",
-    "build": "vue-tsc -b && vite build",
+    "build": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {

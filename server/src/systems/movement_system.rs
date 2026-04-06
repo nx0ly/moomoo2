@@ -14,51 +14,53 @@ pub fn movement_system(
 ) {
     let dt = DT;
 
-    for (mut pos, mut vel, move_dir) in query.iter_mut() {
-        let mut vx = vel.0;
-        let mut vy = vel.1;
+    query
+        .par_iter_mut()
+        .for_each(|(mut pos, mut vel, move_dir)| {
+            let mut vx = vel.0;
+            let mut vy = vel.1;
 
-        if let Some(dir) = move_dir.0 {
-            let target_vx = dir.cos() * PLAYER_MAX_SPEED;
-            let target_vy = dir.sin() * PLAYER_MAX_SPEED;
+            if let Some(dir) = move_dir.0 {
+                let target_vx = dir.cos() * PLAYER_MAX_SPEED;
+                let target_vy = dir.sin() * PLAYER_MAX_SPEED;
 
-            let dx = target_vx - vx;
-            let dy = target_vy - vy;
+                let dx = target_vx - vx;
+                let dy = target_vy - vy;
 
-            let dist = (dx * dx + dy * dy).sqrt();
-            let max_step = PLAYER_ACCEL * dt;
+                let dist = (dx * dx + dy * dy).sqrt();
+                let max_step = PLAYER_ACCEL * dt;
 
-            if dist > max_step {
-                vx += dx / dist * max_step;
-                vy += dy / dist * max_step;
+                if dist > max_step {
+                    vx += dx / dist * max_step;
+                    vy += dy / dist * max_step;
+                } else {
+                    vx = target_vx;
+                    vy = target_vy;
+                }
             } else {
-                vx = target_vx;
-                vy = target_vy;
+                // friction when no input
+                let speed = (vx * vx + vy * vy).sqrt();
+                let mut drop = 0_f32;
+
+                if pos.0 < 4096. {
+                    drop = SNOW_FRICTION * dt;
+                } else {
+                    drop = PLAYER_FRICTION * dt;
+                }
+
+                if speed > drop {
+                    vx -= vx / speed * drop;
+                    vy -= vy / speed * drop;
+                } else {
+                    vx = 0.0;
+                    vy = 0.0;
+                }
             }
-        } else {
-            // friction when no input
-            let speed = (vx * vx + vy * vy).sqrt();
-            let mut drop = 0_f32;
 
-            if pos.0 < 4096. {
-                drop = SNOW_FRICTION * dt;
-            } else {
-                drop = PLAYER_FRICTION * dt;
-            }
+            vel.0 = vx;
+            vel.1 = vy;
 
-            if speed > drop {
-                vx -= vx / speed * drop;
-                vy -= vy / speed * drop;
-            } else {
-                vx = 0.0;
-                vy = 0.0;
-            }
-        }
-
-        vel.0 = vx;
-        vel.1 = vy;
-
-        pos.0 += vx * dt;
-        pos.1 += vy * dt;
-    }
+            pos.0 += vx * dt;
+            pos.1 += vy * dt;
+        });
 }

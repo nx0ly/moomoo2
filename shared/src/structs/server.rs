@@ -1,8 +1,8 @@
 use bevy_ecs::component::Component;
 #[cfg(feature = "web")]
-use wasm_bindgen::prelude::*;
-#[cfg(feature = "web")]
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "web")]
+use wasm_bindgen::prelude::*;
 
 use borsh_derive::{BorshDeserialize, BorshSerialize};
 
@@ -43,21 +43,27 @@ impl From<JsPlayer> for Player {
     }
 }
 
-// #[derive(Debug, Clone, BorshDeserialize, BorshSerialize)]
-// #[cfg_attr(feature = "server", derive(Component))]
-// #[cfg_attr(feature = "web", derive(Serialize, Deserialize))]
-// pub struct GameObject {
-//     pub id: u32,
-//     pub x: 32,
-//     pub y: 32
-// }
+#[derive(Debug, Clone, BorshDeserialize, BorshSerialize)]
+#[cfg_attr(feature = "server", derive(Component))]
+#[cfg_attr(feature = "web", derive(Serialize, Deserialize))]
+pub struct GameObject {
+    pub id: u32,
+    pub x: f32,
+    pub y: f32,
+    pub scale: f32,
+}
 
-// #[cfg(feature = "web")]
-// impl From<JsGameObject> for GameObject {
-//     fn from(value: JsGameObject) -> Self {
-//         Self {  }
-//     }
-// }
+#[cfg(feature = "web")]
+impl From<JsGameObject> for GameObject {
+    fn from(value: JsGameObject) -> Self {
+        Self {
+            id: value.get_id(),
+            x: value.get_x(),
+            y: value.get_y(),
+            scale: value.get_scale(),
+        }
+    }
+}
 
 #[derive(Debug, Clone, BorshDeserialize, BorshSerialize)]
 #[cfg_attr(feature = "web", derive(Serialize, Deserialize))]
@@ -65,9 +71,12 @@ pub struct Move {
     pub dir: Option<f32>,
 }
 
-
 #[derive(Debug, Clone, BorshDeserialize, BorshSerialize)]
 #[cfg_attr(feature = "web", derive(Serialize, Deserialize))]
 pub struct Aim {
     pub dir: Option<f32>,
 }
+
+#[derive(Debug, Clone, BorshDeserialize, BorshSerialize)]
+#[cfg_attr(feature = "web", derive(Serialize, Deserialize))]
+pub struct HitEvent {}

@@ -12,6 +12,7 @@ use rapier2d::{
     },
     prelude::SharedShape,
 };
+use rayon::iter::IntoParallelRefIterator;
 use std::collections::HashMap;
 
 use crate::structs::components::Position;
@@ -82,7 +83,7 @@ pub fn collision_resolution_system(
     // reactive vs reactive
     for i in 0..reactives.len() {
         let (pos_i_x, pos_i_y, col_i_rad) =
-            (reactives[i].2.0, reactives[i].2.1, reactives[i].3.rad);
+            (reactives[i].2 .0, reactives[i].2 .1, reactives[i].3.rad);
 
         let search_radius = col_i_rad * 3.0;
         let query_rect = Rect::new(
@@ -143,15 +144,22 @@ pub fn collision_resolution_system(
     }
 
     // reactive vs non reactive
-    for (_, mut pos, col) in reactive_query.iter_mut() {
-        for (wall_pos, wall_col) in non_reactive_query.iter() {
-            let dx = wall_pos.0 - pos.0;
-            let dy = wall_pos.1 - pos.1;
+
+    // collect walls once, outside the parallel loop
+    let walls: Vec<_> = non_reactive_query
+        .iter()
+        .map(|(pos, col)| ((pos.0, pos.1), col.clone()))
+        .collect();
+
+    reactive_query.par_iter_mut().for_each(|(_, mut pos, col)| {
+        for ((wx, wy), wall_col) in &walls {
+            let dx = wx - pos.0;
+            let dy = wy - pos.1;
             let combined_rad = col.rad + wall_col.rad;
 
             if dx * dx + dy * dy < combined_rad * combined_rad {
                 let iso_a = Isometry::translation(pos.0, pos.1);
-                let iso_b = Isometry::translation(wall_pos.0, wall_pos.1);
+                let iso_b = Isometry::translation(*wx, *wy);
 
                 if let Ok(Some(contact)) = contact(
                     &iso_a,
@@ -168,5 +176,5 @@ pub fn collision_resolution_system(
                 }
             }
         }
-    }
+    });
 }

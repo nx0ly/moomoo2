@@ -18,12 +18,19 @@ use x25519_dalek::{EphemeralSecret, PublicKey};
 use bevy_ecs::{prelude::*, schedule::ScheduleBuildSettings};
 use dashmap::DashMap;
 use parking_lot::Mutex;
-use shared::to_client::{ClientMessages, PlayerTO, UpdatePlayerData};
-use shared::to_server::{AimMessage, MoveMessage, SpawnMessage};
-use shared::PacketType;
+use shared::{
+    structs::server::HitEvent as sharedHitEvent,
+    to_client::ObjectTO,
+    to_server::{AimMessage, MoveMessage, SpawnMessage},
+};
 use shared::{
     structs::server::{Aim, Move, Player},
     to_client::{AddAnimalData, AnimalTO},
+};
+use shared::{to_client::HitEventTO, PacketType};
+use shared::{
+    to_client::{PlayerTO, UpdatePlayerData},
+    to_server::{ClientMessages, HitMessage},
 };
 use tokio::sync::mpsc as god;
 use tokio::sync::Mutex as AsyncMutex;
@@ -40,11 +47,12 @@ use crate::{
     structs::{
         bevy::{IDToConnection, PlayerConnection, PlayerMap, World},
         components::{
-            spawn_wall, AiState, AiTarget, AimDir, AnimalEntity, AnimalType, Health, MoveDir, Name,
-            PlayerBundle, PlayerEntity, Position, Resources, Velocity,
+            spawn_wall, AiState, AiTarget, AimDir, AnimalEntity, AnimalType, AttackState, Health,
+            HitEvents, MoveDir, Name, ObjectEntity, PlayerBundle, PlayerEntity, Position,
+            ReloadState, Resources, Velocity,
         },
     },
-    systems::{GlobalRng, ReactiveCollider},
+    systems::{init_map, GlobalRng, NonReactiveCollider, ReactiveCollider},
 };
 
 mod config;
@@ -174,8 +182,14 @@ async fn main() -> anyhow::Result<()> {
         use crate::systems::{Collider, NonReactiveCollider};
 
         let mut w = world.lock();
+        let mut rng = GlobalRng(WyRand::new());
+
+        init_map(&mut w.bevy_world, &mut rng);
+
         w.bevy_world.insert_resource(PlayerMap::default());
-        w.bevy_world.insert_resource(GlobalRng(WyRand::new()));
+        w.bevy_world.insert_resource(rng);
+        w.bevy_world.insert_resource(HitEvents::default());
+
         // w.bevy_world
         //     .insert_resource(crate::systems::BoidsCache::new(8162));
         //
@@ -395,6 +409,16 @@ async fn main() -> anyhow::Result<()> {
                                         .await;
                                 }
                             }
+                            Some(PacketType::HitEvent) => {
+                                if let Ok(data) = decode::<HitMessage>(&plaintext[1..]) {
+                                    let _ = game_tx
+                                        .send((
+                                            player_id,
+                                            InternalGameMessages::PlayerHit(sharedHitEvent {}),
+                                        ))
+                                        .await;
+                                }
+                            }
                             _ => {}
                         }
                     }
@@ -419,7 +443,9 @@ async fn main() -> anyhow::Result<()> {
             .before(CollisionSet),
     );
 
-    schedule.add_systems(systems::collision_resolution_system.in_set(CollisionSet));
+    schedule.add_systems(
+        (systems::collision_resolution_system, systems::attack_system).in_set(CollisionSet),
+    );
     /*
     let mut interval = tokio::time::interval(Duration::from_millis(67));
     loop {
@@ -578,6 +604,8 @@ async fn main() -> anyhow::Result<()> {
                                 player_map.map.iter().map(|e| (*e.0, *e.1)).collect()
                             };
 
+                            let player_connections_1 = player_connections.clone();
+
                             for (existing_id, entity) in entities {
                                 if let (Some(name), Some(pos), Some(aim)) = (
                                     bevy.get::<Name>(entity),
@@ -601,12 +629,52 @@ async fn main() -> anyhow::Result<()> {
                                         ),
                                     )
                                     .unwrap();
-                                    rt_handle.block_on(World::send_to(
-                                        id,
-                                        &msg,
-                                        &player_connections,
-                                    ));
+
+                                    let player_connections = player_connections.clone();
+                                    rt_handle.spawn(async move {
+                                        World::send_to(id, &msg, &player_connections).await;
+                                    });
                                 }
+                            }
+
+                            {
+                                let mut objects = Vec::new();
+                                for entity in bevy
+                                    .query::<(
+                                        Entity,
+                                        &ObjectEntity,
+                                        &Position,
+                                        &AimDir,
+                                        &Health,
+                                        &Resources,
+                                        &Collider,
+                                        &NonReactiveCollider,
+                                    )>()
+                                    .iter(&bevy)
+                                {
+                                    let a = ObjectTO {
+                                        id: entity.0.index(),
+                                        x: entity.2 .0,
+                                        y: entity.2 .1,
+                                        scale: entity.6.rad,
+                                    };
+                                    println!("{:?}", a);
+
+                                    objects.push(a);
+                                }
+
+                                let msg = encode(
+                                    7,
+                                    ClientMessages::AddObject(shared::to_client::AddObjectData {
+                                        objects,
+                                    }),
+                                )
+                                .unwrap();
+
+                                let player_connections = player_connections.clone();
+                                rt_handle.spawn(async move {
+                                    World::send_to(id, &msg, &player_connections).await;
+                                });
                             }
 
                             // spawn the new player entity
@@ -619,7 +687,10 @@ async fn main() -> anyhow::Result<()> {
                                     Velocity(p.vx, p.vy),
                                     MoveDir(None),
                                     AimDir(0.0),
+                                    structs::weapons::Weapon::Fists,
+                                    ReloadState(0, 300),
                                     Health(100., 100.),
+                                    AttackState(false),
                                     Resources(100, 100, 100, 100, 0),
                                     Collider::circle(35.),
                                     ReactiveCollider,
@@ -643,11 +714,11 @@ async fn main() -> anyhow::Result<()> {
                                 }),
                             )
                             .unwrap();
-                            rt_handle.block_on(World::send_to(
-                                id,
-                                &spawn_self,
-                                &player_connections,
-                            ));
+
+                            // let player_connections = player_connections.clone();
+                            rt_handle.spawn(async move {
+                                World::send_to(id, &spawn_self, &player_connections_1).await;
+                            });
 
                             // tell all existing players about the new player
                             let spawn_other = encode(
@@ -665,11 +736,16 @@ async fn main() -> anyhow::Result<()> {
                                 }),
                             )
                             .unwrap();
-                            rt_handle.block_on(World::broadcast_with_exceptions(
-                                &[id],
-                                &spawn_other,
-                                &player_connections,
-                            ));
+
+                            let player_connections = player_connections.clone();
+                            rt_handle.spawn(async move {
+                                World::broadcast_with_exceptions(
+                                    &[id],
+                                    &spawn_other,
+                                    &player_connections,
+                                )
+                                .await;
+                            });
                         }
                         InternalGameMessages::MovePlayer(m) => {
                             if let Some(&e) = bevy.resource::<PlayerMap>().map.get(&id) {
@@ -694,10 +770,45 @@ async fn main() -> anyhow::Result<()> {
                                 bevy.despawn(e);
                             }
                         }
+                        InternalGameMessages::PlayerHit(_) => {
+                            if let Some(&e) = bevy.resource::<PlayerMap>().map.get(&id) {
+                                if let Some(mut hit) = bevy.get_mut::<AttackState>(e) {
+                                    hit.0 = !hit.0;
+                                    // println!("ok");
+                                }
+                            }
+                        }
                     }
                 }
 
                 schedule.run(bevy);
+
+                // here
+                let hits = std::mem::take(&mut bevy.resource_mut::<HitEvents>().0);
+
+                if !hits.is_empty() {
+                    // build reverse map: Entity -> player_id
+                    let player_map = bevy.resource::<PlayerMap>();
+                    let entity_to_id: std::collections::HashMap<Entity, u8> =
+                        player_map.map.iter().map(|e| (*e.1, *e.0)).collect();
+
+                    for hit in hits {
+                        if let Some(&player_id) = entity_to_id.get(&hit.attacker) {
+                            let msg = encode(
+                                6,
+                                HitEventTO {
+                                    entity_id: player_id,
+                                },
+                            )
+                            .unwrap();
+                            let connections = player_connections.clone();
+
+                            rt_handle.spawn(async move {
+                                World::broadcast(&msg, &connections).await;
+                            });
+                        }
+                    }
+                }
 
                 let player_map = bevy.resource::<PlayerMap>();
                 let mut updates = Vec::new();
@@ -734,7 +845,10 @@ async fn main() -> anyhow::Result<()> {
 
                 if !updates.is_empty() {
                     let update_msg = encode(3, UpdatePlayerData { players: updates }).unwrap();
-                    rt_handle.block_on(World::broadcast(&update_msg, &player_connections));
+                    let player_connections = player_connections.clone();
+                    rt_handle.spawn(async move {
+                        World::broadcast(&update_msg, &player_connections).await;
+                    });
                 }
 
                 if !animal_updates.is_empty() {
@@ -745,7 +859,11 @@ async fn main() -> anyhow::Result<()> {
                         },
                     )
                     .unwrap();
-                    rt_handle.block_on(World::broadcast(&update_msg, &player_connections));
+
+                    let player_connections = player_connections.clone();
+                    rt_handle.spawn(async move {
+                        World::broadcast(&update_msg, &player_connections).await;
+                    });
                 }
 
                 if let Some(remaining) = tick.checked_sub(start.elapsed()) {

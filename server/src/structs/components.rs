@@ -1,6 +1,10 @@
 use bevy_ecs::{bundle::Bundle, component::Component, entity::Entity};
+use shared::objects::GameObjects;
 
-use crate::{structs::bevy, systems::{Collider, ReactiveCollider}};
+use crate::{
+    structs::{bevy, weapons::Weapon},
+    systems::{Collider, NonReactiveCollider, ReactiveCollider},
+};
 
 #[derive(Component, Clone, Copy, Debug)]
 // x, y
@@ -23,6 +27,9 @@ pub struct PlayerEntity;
 pub struct AnimalEntity;
 
 #[derive(Component)]
+pub struct ObjectEntity;
+
+#[derive(Component)]
 // wood, stone, berry, gold, kills
 pub struct Resources(pub u32, pub u32, pub u32, pub u32, pub u32);
 
@@ -42,6 +49,9 @@ pub enum AnimalType {
 // current, max
 pub struct Health(pub f32, pub f32);
 
+#[derive(Component, Clone, Debug)]
+pub struct AttackState(pub bool);
+
 // potential use in the future
 #[derive(Component, Clone, Copy, Debug)]
 pub enum AiState {
@@ -53,12 +63,12 @@ pub enum AiState {
 }
 
 #[derive(Component, Clone, Copy, Debug)]
+// current, max
+pub struct ReloadState(pub u32, pub u32);
+
+#[derive(Component, Clone, Copy, Debug)]
 // target, x, y
-pub struct AiTarget (
-    pub Option<Entity>,
-    pub f32,
-    pub f32,
-);
+pub struct AiTarget(pub Option<Entity>, pub f32, pub f32);
 
 #[derive(Bundle)]
 pub struct PlayerBundle(
@@ -68,10 +78,25 @@ pub struct PlayerBundle(
     pub Velocity,
     pub MoveDir,
     pub AimDir,
+    pub Weapon,
+    pub ReloadState,
     pub Health,
+    pub AttackState,
     pub Resources,
     pub Collider,
     pub ReactiveCollider,
+);
+
+#[derive(Bundle)]
+pub struct ObjectBundle(
+    pub ObjectEntity,
+    pub GameObjects,
+    pub Position,
+    pub AimDir,
+    pub Health,
+    pub Resources,
+    pub Collider,
+    pub NonReactiveCollider,
 );
 
 pub fn spawn_wall(
@@ -121,4 +146,12 @@ pub fn spawn_animal(
             Name(format!("{:?}", animal_type)),
         ))
         .id()
+}
+
+#[derive(bevy_ecs::prelude::Resource, Default)]
+pub struct HitEvents(pub Vec<HitEvent>);
+
+pub struct HitEvent {
+    pub attacker: Entity,
+    pub affected: Vec<Entity>,
 }

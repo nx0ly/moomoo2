@@ -1,19 +1,15 @@
-pub mod tree;
-pub mod stone;
-pub mod bush;
+use bevy_ecs::component::Component;
 
-pub trait GameObject {
-    fn init(&mut self);
-    fn destroy(&mut self);
-}
-
+#[cfg_attr(feature = "server", derive(Component))]
 pub enum GameObjects {
-    UsableGameObjects, PlacableGameObjects, StaticGameObjects
+    UsableGameObjects(UsableGameObjects),
+    PlacableGameObjects(PlacableGameObjects),
+    StaticGameObjects(StaticGameObjects),
 }
 
 // healing
 pub enum UsableGameObjects {
-    Apple
+    Apple,
 }
 
 pub enum PlacableGameObjects {

@@ -7,7 +7,7 @@ use borsh_derive::{BorshDeserialize, BorshSerialize};
 
 #[cfg(feature = "web")]
 // use crate::structs::server::GameObject;
-use crate::structs::server::{Aim, Move, Player};
+use crate::structs::server::{Aim, GameObject, HitEvent, Move, Player};
 
 #[cfg(feature = "web")]
 #[wasm_bindgen]
@@ -72,20 +72,49 @@ impl From<Player> for JsPlayer {
 #[wasm_bindgen]
 #[derive(BorshSerialize, Deserialize, Serialize, BorshDeserialize)]
 pub struct JsGameObject {
-
+    pub id: u32,
+    pub x: f32,
+    pub y: f32,
+    pub scale: f32,
 }
 
 #[cfg(feature = "web")]
 impl JsGameObject {
-    
+    pub fn get_id(&self) -> u32 {
+        self.id
+    }
+
+    pub fn get_x(&self) -> f32 {
+        self.x
+    }
+
+    pub fn get_y(&self) -> f32 {
+        self.y
+    }
+
+    pub fn get_scale(&self) -> f32 {
+        self.scale
+    }
 }
 
-// #[cfg(feature = "web")]
-// impl From<GameObject> for JsGameObject {
-//     fn from(value: GameObject) -> Self {
-//         Self {}
-//     }
-// }
+#[cfg(feature = "web")]
+impl From<GameObject> for JsGameObject {
+    fn from(value: GameObject) -> Self {
+        Self {
+            id: value.id,
+            x: value.x,
+            y: value.y,
+            scale: value.scale,
+        }
+    }
+}
+
+#[cfg(feature = "web")]
+#[wasm_bindgen]
+#[derive(BorshSerialize, Deserialize, Serialize)]
+pub struct JsHitEvent {
+    entity: u32,
+}
 
 #[cfg(feature = "web")]
 #[wasm_bindgen]

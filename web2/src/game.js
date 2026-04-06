@@ -1,4 +1,3 @@
-
 import init, {
   encode_into_bytes,
   HandshakeState,
@@ -69,7 +68,10 @@ export class Game {
       merged.set(value, handshakeBuffer.length);
       handshakeBuffer = merged;
     }
-    const serverHelloLen = new DataView(handshakeBuffer.buffer).getUint32(0, false);
+    const serverHelloLen = new DataView(handshakeBuffer.buffer).getUint32(
+      0,
+      false,
+    );
     while (handshakeBuffer.length < 4 + serverHelloLen) {
       const { value, done } = await this.reader.read();
       if (done) throw new Error("connection closed during handshake");
@@ -78,7 +80,9 @@ export class Game {
       merged.set(value, handshakeBuffer.length);
       handshakeBuffer = merged;
     }
-    this.crypto = handshake.complete_handshake(handshakeBuffer.slice(4, 4 + serverHelloLen));
+    this.crypto = handshake.complete_handshake(
+      handshakeBuffer.slice(4, 4 + serverHelloLen),
+    );
     console.log("handshake finished");
     console.log(`send nonce: ${this.crypto.get_send_nonce()}`);
     console.log(`receive nonce: ${this.crypto.get_recv_nonce()}`);
@@ -87,9 +91,10 @@ export class Game {
     window.addEventListener("mousemove", this.handleMouseMove);
     window.addEventListener("keyup", this.handleKey);
     window.addEventListener("wheel", this.handleWheel, { passive: true });
+    window.addEventListener("mousedown", this.handleMousedown);
+    window.addEventListener("mouseup", this.handleMousedown);
 
     this.read();
-
   }
 
   handleKey = (e) => {
@@ -100,6 +105,10 @@ export class Game {
     if (e.key === "d" || e.key === "ArrowRight") this.moveInput.right = down;
 
     this.sendInput();
+  };
+
+  handleMousedown = async (e) => {
+    await this.sendEncrypted({}, 6);
   };
 
   handleMouseMove = (e) => {
@@ -219,39 +228,39 @@ export class Game {
 
         let { is_mine, data } = packet.data;
 
-        console.warn(packet.data)
+        let player = new Player(
+          data,
+          [
+            this.renderer.textures.player_texture,
+            this.renderer.textures.arm1_texture,
+            this.renderer.textures.arm2_texture,
+          ],
+          this.renderer.world,
+        );
 
-        let player = new Player(data);
-        game.players.push(player);
+        this.players.push(player);
+
         if (is_mine) {
-          game.my_player = player;
+          this.my_player = player;
         }
-
-        break;
-
-      // not used at the moment, later: add client prediction to smoothen movements
-      case 2:
-        console.log("player moved:", packet.data);
 
         break;
 
       case 3:
         let { players } = packet.data;
-        console.log(players);
-        for (let player of players) {
-          let p = game.utils.findPlayerByID(player.id) || {};
+        for (let p of players) {
+          let player = this.utils.findPlayerByID(p.id);
 
-          console.log(p)
+          if (!player) continue;
 
-          p.x = player.x;
-          p.y = player.y;
-          p.weapon = player.weapon;
-          p.lastAim = p.aim;
-          p.aim = player.aim;
+          player.x = p.x;
+          player.y = p.y;
+          player.weapon = p.weapon;
+          player.lastAim = p.aim;
+          player.aim = p.aim;
 
-          let player_sprite = this.renderer.player_id_to_sprite[p.id] || {};
-          player_sprite.x = p.x;
-          player_sprite.y = p.y;
+          player.sprite.x = p.x;
+          player.sprite.y = p.y;
         }
 
         this.sendAim(this.lastAimDir);
@@ -268,6 +277,18 @@ export class Game {
         // console.log(this.renderer.animals[0]) //we already know its bad gng
         break;
 
+      case 6:
+        console.log(packet.data.entity_id);
+        let playeraa = this.utils.findPlayerByID(packet.data.entity_id);
+        playeraa.attackAnim = 1;
+        playeraa.animateRightArm = !playeraa.animateRightArm;
+        break;
+
+      case 7:
+        console.error(packet.data);
+        this.objects = packet.data.objects;
+        break;
+
       default:
         console.warn("unknown packet type:", packet.code);
     }
@@ -275,13 +296,11 @@ export class Game {
 
   async sendMove(direction) {
     const moveData = { dir: direction };
-    console.log(moveData);
     await this.sendEncrypted(moveData, 2);
   }
 
   async sendAim(direction) {
     const aimData = { dir: direction };
-    console.log(aimData);
     await this.sendEncrypted(aimData, 5);
   }
 
@@ -323,18 +342,6 @@ export class Game {
 
 const game = new Game();
 await game.init();
-
-
-
-
-
-
-
-
-
-
-
-
 
 console.log("why ass");
 var ui = 0;

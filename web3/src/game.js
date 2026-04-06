@@ -1,11 +1,3 @@
-import {
-  Application,
-  Assets,
-  Container,
-  Sprite,
-  Text,
-  TextStyle,
-} from "pixi.js";
 import init, {
   encode_into_bytes,
   HandshakeState,
@@ -21,12 +13,16 @@ export class Game {
     this.renderer = new Render(this);
 
     this.players = [];
+    this.animals = [];
     this.objects = [];
 
     this.my_player = null;
 
     this.moveInput = { up: false, down: false, left: false, right: false };
+    this.lastMoveDir = null;
     this.zoomDelta = 0;
+
+    this.lastAimDir = 0;
 
     this.utils = {
       game: this,
@@ -57,25 +53,48 @@ export class Game {
     const handshake = HandshakeState.create_client_hello();
     const clientHelloBytes = handshake.message();
 
-    await this.sender.write(clientHelloBytes);
+    const helloFramed = new ArrayBuffer(4 + clientHelloBytes.byteLength);
+    new DataView(helloFramed).setUint32(0, clientHelloBytes.byteLength, false);
+    new Uint8Array(helloFramed, 4).set(clientHelloBytes);
+    await this.sender.write(new Uint8Array(helloFramed));
     console.log("sent ClientHello");
 
-    const { value: serverHelloBytes, done } = await this.reader.read();
-    if (done || !serverHelloBytes) {
-      throw new Error("connection closed during handshake");
+    let handshakeBuffer = new Uint8Array(0);
+    while (handshakeBuffer.length < 4) {
+      const { value, done } = await this.reader.read();
+      if (done) throw new Error("connection closed during handshake");
+      const merged = new Uint8Array(handshakeBuffer.length + value.length);
+      merged.set(handshakeBuffer);
+      merged.set(value, handshakeBuffer.length);
+      handshakeBuffer = merged;
     }
-    console.log("received ServerHello");
-
-    this.crypto = handshake.complete_handshake(serverHelloBytes);
+    const serverHelloLen = new DataView(handshakeBuffer.buffer).getUint32(
+      0,
+      false,
+    );
+    while (handshakeBuffer.length < 4 + serverHelloLen) {
+      const { value, done } = await this.reader.read();
+      if (done) throw new Error("connection closed during handshake");
+      const merged = new Uint8Array(handshakeBuffer.length + value.length);
+      merged.set(handshakeBuffer);
+      merged.set(value, handshakeBuffer.length);
+      handshakeBuffer = merged;
+    }
+    this.crypto = handshake.complete_handshake(
+      handshakeBuffer.slice(4, 4 + serverHelloLen),
+    );
     console.log("handshake finished");
     console.log(`send nonce: ${this.crypto.get_send_nonce()}`);
     console.log(`receive nonce: ${this.crypto.get_recv_nonce()}`);
 
-    this.read();
-
     window.addEventListener("keydown", this.handleKey);
+    window.addEventListener("mousemove", this.handleMouseMove);
     window.addEventListener("keyup", this.handleKey);
     window.addEventListener("wheel", this.handleWheel, { passive: true });
+    window.addEventListener("mousedown", this.handleMousedown);
+    window.addEventListener("mouseup", this.handleMousedown);
+
+    this.read();
   }
 
   handleKey = (e) => {
@@ -86,6 +105,19 @@ export class Game {
     if (e.key === "d" || e.key === "ArrowRight") this.moveInput.right = down;
 
     this.sendInput();
+  };
+
+  handleMousedown = async (e) => {
+    await this.sendEncrypted({}, 6);
+  };
+
+  handleMouseMove = (e) => {
+    const cx = window.innerWidth / 2;
+    const cy = window.innerHeight / 2;
+    let aim = Math.atan2(e.clientY - cy, e.clientX - cx);
+
+    if (this.lastAimDir == aim) return;
+    this.lastAimDir = aim;
   };
 
   handleWheel = (e) => {
@@ -112,7 +144,9 @@ export class Game {
       dir = Math.atan2(dy, dx);
     }
 
-    console.warn(dir);
+    if (this.lastMoveDir == dir) return;
+    this.lastMoveDir = dir;
+
     this.sendMove(dir);
   };
 
@@ -137,8 +171,10 @@ export class Game {
     try {
       const plaintext = encode_into_bytes(data, opcode);
       const ciphertext = this.crypto.encrypt(plaintext);
-
-      await this.sender.write(ciphertext);
+      const buf = new ArrayBuffer(4 + ciphertext.byteLength);
+      new DataView(buf).setUint32(0, ciphertext.byteLength, false);
+      new Uint8Array(buf, 4).set(ciphertext);
+      await this.sender.write(new Uint8Array(buf));
     } catch (e) {
       console.error("failed to send encrypted message:", e);
       throw e;
@@ -186,11 +222,14 @@ export class Game {
   }
 
   handlePacket(packet) {
+    console.warn(packet);
     switch (packet.code) {
       case 1:
         console.log("player spawned:", packet.data);
 
         let { is_mine, data } = packet.data;
+
+        console.warn(packet.data);
 
         let player = new Player(data);
         game.players.push(player);
@@ -200,6 +239,7 @@ export class Game {
 
         break;
 
+      // not used at the moment, later: add client prediction to smoothen movements
       case 2:
         console.log("player moved:", packet.data);
 
@@ -211,25 +251,43 @@ export class Game {
         for (let player of players) {
           let p = game.utils.findPlayerByID(player.id) || {};
 
+          console.log(p);
+
           p.x = player.x;
           p.y = player.y;
           p.weapon = player.weapon;
+          p.lastAim = p.aim;
+          p.aim = player.aim;
 
           let player_sprite = this.renderer.player_id_to_sprite[p.id] || {};
           player_sprite.x = p.x;
           player_sprite.y = p.y;
         }
 
+        this.sendAim(this.lastAimDir);
+
         break;
 
       case 4:
-        this.renderer.animals = packet.data.animals.map((a) => ({
+        this.animals = packet.data.animals.map((a) => ({
           sid: a.id,
           x: a.x,
           y: a.y,
           type: a.animal_type,
         }));
         // console.log(this.renderer.animals[0]) //we already know its bad gng
+        break;
+
+      case 6:
+        console.error(packet.data);
+        let playeraa = game.utils.findPlayerByID(packet.data.entity_id);
+        playeraa.attackAnim = 1;
+        playeraa.animateRightArm = !playeraa.animateRightArm;
+        break;
+
+      case 7:
+        console.error(packet.data);
+        game.objects = packet.data.objects;
         break;
 
       default:
@@ -241,6 +299,12 @@ export class Game {
     const moveData = { dir: direction };
     console.log(moveData);
     await this.sendEncrypted(moveData, 2);
+  }
+
+  async sendAim(direction) {
+    const aimData = { dir: direction };
+    console.log(aimData);
+    await this.sendEncrypted(aimData, 5);
   }
 
   cleanup() {

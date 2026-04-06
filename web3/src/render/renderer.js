@@ -43,6 +43,23 @@ export class Render {
     this.animals = [];
     this.objectTextures = {};
 
+    this.nameTextStyle = new TextStyle({
+      fontSize: 20,
+      fontFamily: "GameFont",
+      fontWeight: "normal",
+      fill: "#fff",
+      stroke: {
+        color: "#454545",
+        width: 6.7,
+        join: "round",
+      },
+      align: "center",
+      letterSpacing: 0.67,
+    });
+
+    this.lastCleanupTime = 0;
+    this.cleanupInterval = 1000;
+
     this.drawGrid(this.grid, 16384, 16384, 64);
   }
 
@@ -73,9 +90,6 @@ export class Render {
     this.arm_textures.push(
       ...[await Assets.load(Arm1), await Assets.load(Arm2)],
     );
-    this.textures.arm1_texture = this.arm_textures[0];
-    this.textures.arm2_texture = this.arm_textures[1];
-
     await Assets.load({
       src: "/src/assets/game_font.ttf",
       data: { family: "GameFont" },
@@ -92,6 +106,7 @@ export class Render {
 
   // draw loop
   draw = (ticker) => {
+    // get my player and abort i i haven't spawned yet
     const myPlayer = this.game?.my_player;
     if (!myPlayer) return;
 
@@ -101,17 +116,113 @@ export class Render {
     const interpolationAlpha = 1 - Math.pow(0.67, delta / 0.067);
 
     // camera movement
-    this.camera.update(delta, myPlayer);
+    const camDx = myPlayer.x - this.camera.x;
+    const camDy = myPlayer.y - this.camera.y;
+    const camDist = Math.hypot(camDy, camDx);
+
+    this.camera.x += camDx * Math.min(0.05, camDist * 0.05 * delta);
+    this.camera.y += camDy * Math.min(0.05, camDist * 0.05 * delta);
 
     this.world.x = (this.app.screen.width >> 1) - this.camera.x;
     this.world.y = (this.app.screen.height >> 1) - this.camera.y;
 
-    for (const player of this.game.players) {
-      player.update(
-        delta,
-        player.id == myPlayer.id ? this.game.lastAimDir : player.visualAim,
-        interpolationAlpha,
-      );
+    // update player positions
+    for (let i = 0; i < this.game.players.length; i++) {
+      const player = this.game.players[i];
+      let is_mine = player.id == this.game.my_player.id;
+      let sprite = this.player_id_to_sprite[player.id];
+
+      // create new texture
+      if (!sprite) {
+        sprite = new Sprite(this.textures.player_texture);
+
+        sprite.arm1 = new Sprite(this.arm_textures[0]);
+        sprite.arm2 = new Sprite(this.arm_textures[1]);
+
+        sprite.arm1.anchor.set(0.5);
+        sprite.arm2.anchor.set(0.5);
+        sprite.arm1.width = 50;
+        sprite.arm1.height = 60;
+        sprite.arm2.width = 50;
+        sprite.arm2.height = 60;
+
+        sprite.anchor.set(0.5);
+        sprite.width = sprite.height = 70;
+
+        const label = new Text({
+          text: player.name,
+          style: this.nameTextStyle,
+        });
+        label.anchor.set(0.5, 1);
+        sprite._label = label;
+
+        this.player_id_to_sprite[player.id] = sprite;
+
+        this.world.addChild(sprite.arm1);
+        this.world.addChild(sprite.arm2);
+        this.world.addChild(sprite);
+        this.world.addChild(label);
+
+        sprite._rx = player.x;
+        sprite._ry = player.y;
+      }
+
+      // rotate
+      sprite.rotation = is_mine ? this.game.lastAimDir : player.visualAim;
+
+      // interpolate
+      sprite._rx += (player.x - sprite._rx) * interpolationAlpha;
+      sprite._ry += (player.y - sprite._ry) * interpolationAlpha;
+      sprite.x = sprite._rx;
+      sprite.y = sprite._ry;
+
+      if (sprite._label) {
+        sprite._label.x = sprite._rx;
+        sprite._label.y = sprite._ry - 40;
+      }
+
+      const aim = is_mine ? this.game.lastAimDir : player.visualAim;
+
+      const restDist = 25;
+      const punchDist = 35;
+      const restAngle = Math.PI / 3;
+
+      let extension = Math.sin(player.attackAnim * Math.PI);
+
+      if (sprite?.arm1) {
+        const isPunching = player.animateRightArm;
+        const currentExt = isPunching ? extension : 0;
+
+        const dist = restDist + (punchDist - restDist) * currentExt;
+
+        const currentAngleOffset = -restAngle * (1 - currentExt);
+
+        sprite.arm1.x = sprite._rx + dist * Math.cos(aim + currentAngleOffset);
+        sprite.arm1.y = sprite._ry + dist * Math.sin(aim + currentAngleOffset);
+
+        sprite.arm1.rotation = aim + (isPunching ? extension : 0);
+      }
+
+      if (sprite?.arm2) {
+        const isPunching = !player.animateRightArm;
+        const currentExt = isPunching ? extension : 0;
+
+        const dist = restDist + (punchDist - restDist) * currentExt;
+        const currentAngleOffset = restAngle * (1 - currentExt);
+
+        sprite.arm2.x = sprite._rx + dist * Math.cos(aim + currentAngleOffset);
+        sprite.arm2.y = sprite._ry + dist * Math.sin(aim + currentAngleOffset);
+
+        sprite.arm2.rotation = aim - (isPunching ? extension : 0);
+      }
+
+      player.attackAnim -= delta * 4;
+      player.attackAnim = Math.max(0, Math.min(player.attackAnim, 1));
+
+      let aimDelta = player.aim - player.visualAim;
+      if (aimDelta > Math.PI) aimDelta -= Math.PI * 2;
+      if (aimDelta < -Math.PI) aimDelta += Math.PI * 2;
+      player.visualAim += aimDelta * interpolationAlpha;
     }
 
     // update animal positions
@@ -166,6 +277,19 @@ export class Render {
 
       sprite.x = object.x;
       sprite.y = object.y;
+      sprite._lastSeen = now;
+    }
+
+    if (now - this.lastCleanupTime > this.cleanupInterval) {
+      for (const sid in this.animal_id_to_sprite) {
+        const sprite = this.animal_id_to_sprite[sid];
+        if (now - sprite._lastSeen > 2000) {
+          this.world.removeChild(sprite);
+          sprite.destroy();
+          delete this.animal_id_to_sprite[sid];
+        }
+      }
+      this.lastCleanupTime = now;
     }
   };
 }

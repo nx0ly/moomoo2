@@ -2,7 +2,7 @@
 <html lang="en">
 
 <head>
-  <meta charset="UTF-8">
+   <meta charset="UTF-8">
    <title>Foes.io</title>
    <link rel="shortcut icon" type="image/png" href="/web/20190120075244im_/https://foes.io/images/favicon.png?v=10" />
    <meta name="viewport"
@@ -11,19 +11,16 @@
    <meta name="keywords" content="game,games,pubg,battleground,royale,fortnite,gaming,online,io,multiplayer,free">
    <meta http-equiv="Cache-control" content="public">
    <link rel="stylesheet" href="mainstyle.css" />
-   <link href="https://fonts.googleapis.com/icon?family=Material+Icons"
-      rel="stylesheet">
+   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
 
-         <script type="module" src="/src/game.js"></script>
+   <script type="module" src="/src/game.js"></script>
 </head>
 
 <body>
    <!-- PRELOAD SCRIPTS -->
-   <script
-      src="/src/lib/jquery.js"></script>
-   <script
-      src="/src/libs/howler.js"></script>
-  
+   <script src="/src/lib/jquery.js"></script>
+   <script src="/src/libs/howler.js"></script>
+
    <!-- MAIN CANVAS -->
    <canvas id="mainCanvas" oncontextmenu="return false;"></canvas>
    <!-- VIGNETTE -->
@@ -49,8 +46,6 @@
    <!-- SHARED UI -->
    <div id="sharedUI">
       <div id="topMenuContainer">
-         <div id="killCount">0 Kills</div>
-         <div id="playerCount">40 Alive</div>
       </div>
       <canvas id="minimap"></canvas>
       <div id="borderTimer">00:00</div>
@@ -61,7 +56,7 @@
          <div id="inGameAd">
             <div align="center" id="foesio_728x90_1">
                <script data-cfasync="false" type="text/javascript">
-                 // freestar.queue.push(function () { googletag.display('foesio_728x90_1'); });
+                  // freestar.queue.push(function () { googletag.display('foesio_728x90_1'); });
                </script>
             </div>
          </div>
@@ -107,7 +102,7 @@
    <!-- MAIN MENU -->
    <div id="roundTimerMenu"></div>
    <div id="mainMenuContainer" style="display:none">
-     <div id="gameName">MOOMOO2.IO</div>
+      <div id="gameName">MOOMOO2.IO</div>
       <div class="mainMenuSub" id="adParent">
          <div class="menuCard" id="adCard">
             <div align="center" id="foesio_300x250_1">
@@ -155,31 +150,6 @@
    </div>
    <!-- HOVER INFO -->
    <div id="hoverDisplay"></div>
-   <!-- SHARE CONTAINER -->
-   <div id="shareContainer">
-      Unlock Items: <span onclick="shareGame(0)" class="shareText">Subscribe</span>
-   </div>
-   <!-- SHARE LINK -->
-   <div id="shareLink">
-      <div>Play with friends at</div>
-      <div id="shareLinkText">foes.io/?server=0:0</div>
-   </div>
-   <!-- CREATED BY CONTAINER -->
-   <div id="createContainer">Created by <a
-         href="https://web.archive.org/web/20190120075244/https://twitter.com/Sidney_de_Vries">Sidney</a>
-      &amp; <a href="https://web.archive.org/web/20190120075244/https://twitter.com/EatMyAppless">Vincent</a>
-   </div>
-   <!-- LINKS CONTAINER -->
-   <div id="linksContainer"><span id="versionLink"><a
-            href="https://web.archive.org/web/20190120075244/http://foes.wiki/other/changelog.html">Beta 0.54</a> |
-      </span><a href="https://web.archive.org/web/20190120075244/http://foes.wiki/">Wiki</a> |
-      <a href="https://web.archive.org/web/20190120075244/https://www.reddit.com/r/foesIO/">Reddit</a> | <a
-         href="https://web.archive.org/web/20190120075244/https://discord.gg/2UYUS3f">Discord</a> |
-      <a href="./docs/terms.txt">Terms</a> | <a href="./docs/privacy.txt">Privacy</a>
-   </div>
-   <!-- END AD ZONE -->
-   <div id="cdm-zone-end"></div>
-   <!-- LOAD GAME SCRIPTS -->
 </body>
 
 </html>

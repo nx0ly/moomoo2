@@ -1,9 +1,14 @@
 use serde::Serialize;
-use shared::to_client::{AddAnimalData, AddPlayerData, ClientMessages, UpdatePlayerData};
+use shared::structs::client::{JsAim, JsHitEvent};
+use shared::structs::server::HitEvent;
+use shared::to_client::{
+    AddAnimalData, AddObjectData, AddPlayerData, HitEventTO, UpdatePlayerData,
+};
+use shared::to_server::{AimMessage, ClientMessages, HitMessage, MoveMessage};
 use shared::{
     PacketType,
     structs::client::{JsMove, JsPlayer},
-    structs::server::Move,
+    structs::server::{Aim, Move},
     to_server::SpawnMessage,
 };
 use wasm_bindgen::prelude::*;
@@ -68,10 +73,10 @@ impl SessionCrypto {
         let plaintext = self
             .cipher
             .decrypt(&nonce, ciphertext)
-            .map_err(|e| JsValue::from_str(&format!("decryption failed: {}", e)));
+            .map_err(|e| JsValue::from_str(&format!("decryption failed: {}", e)))?;
 
         self.recv_nonce = self.recv_nonce.wrapping_add(1);
-        plaintext
+        Ok(plaintext)
     }
 
     // debug stuff
@@ -247,6 +252,9 @@ fn decode_bytes_inner(bytes: &[u8]) -> Result<JsValue, JsValue> {
 
                 let data = match data {
                     ClientMessages::AddPlayer(d) => d,
+                    _ => {
+                        return Err(JsValue::from_str("invalid spawn packet"));
+                    }
                 };
 
                 let packet = DecodedPacket { code: *code, data };
@@ -260,10 +268,40 @@ fn decode_bytes_inner(bytes: &[u8]) -> Result<JsValue, JsValue> {
                 Ok(serde_wasm_bindgen::to_value(&packet)
                     .map_err(|e| JsValue::from_str(&e.to_string()))?)
             }
+            Some(PacketType::Aim) => {
+                let data = borsh::from_slice::<Aim>(&bytes[1..])
+                    .map_err(|e| JsValue::from_str(&format!("error decoding move {}", e)))?;
+                let packet = DecodedPacket { code: *code, data };
+                Ok(serde_wasm_bindgen::to_value(&packet)
+                    .map_err(|e| JsValue::from_str(&e.to_string()))?)
+            }
+            Some(PacketType::HitEvent) => {
+                let data = borsh::from_slice::<HitEventTO>(&bytes[1..])
+                    .map_err(|e| JsValue::from_str(&format!("error decoding move {}", e)))?;
+                let packet = DecodedPacket { code: *code, data };
+                Ok(serde_wasm_bindgen::to_value(&packet)
+                    .map_err(|e| JsValue::from_str(&e.to_string()))?)
+            }
             Some(PacketType::UpdatePlayers) => {
                 let data = borsh::from_slice::<UpdatePlayerData>(&bytes[1..]).map_err(|e| {
                     JsValue::from_str(&format!("error decoding updateplayers {}", e))
                 })?;
+                let packet = DecodedPacket { code: *code, data };
+
+                Ok(serde_wasm_bindgen::to_value(&packet)
+                    .map_err(|e| JsValue::from_str(&e.to_string()))?)
+            }
+            Some(PacketType::AddObject) => {
+                let data = borsh::from_slice::<ClientMessages>(&bytes[1..])
+                    .map_err(|e| JsValue::from_str(&format!("error decoding addobject {}", e)))?;
+
+                let data = match data {
+                    ClientMessages::AddObject(d) => d,
+                    _ => {
+                        return Err(JsValue::from_str("invalid object packet"));
+                    }
+                };
+
                 let packet = DecodedPacket { code: *code, data };
 
                 Ok(serde_wasm_bindgen::to_value(&packet)
@@ -299,9 +337,25 @@ pub fn encode_into_bytes(packet: JsValue, opcode: u8) -> Result<Box<[u8]>, JsVal
             }
         }
         2 => {
-            let js_move: JsMove = serde_wasm_bindgen::from_value(packet)
+            let js_move: MoveMessage = serde_wasm_bindgen::from_value(packet)
                 .map_err(|x| JsValue::from_str(&x.to_string()))?;
             if let Err(e) = borsh::to_writer(&mut buf, &js_move) {
+                return Err(JsValue::from_str(&format!("error encoding move {}", e)));
+            }
+        }
+        5 => {
+            let js_aim: AimMessage = serde_wasm_bindgen::from_value(packet)
+                .map_err(|x| JsValue::from_str(&x.to_string()))?;
+
+            if let Err(e) = borsh::to_writer(&mut buf, &js_aim) {
+                return Err(JsValue::from_str(&format!("error encoding move {}", e)));
+            }
+        }
+        6 => {
+            let js_hit: HitMessage = serde_wasm_bindgen::from_value(packet)
+                .map_err(|x| JsValue::from_str(&x.to_string()))?;
+
+            if let Err(e) = borsh::to_writer(&mut buf, &js_hit) {
                 return Err(JsValue::from_str(&format!("error encoding move {}", e)));
             }
         }

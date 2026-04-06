@@ -1,8 +1,11 @@
 use crate::{
-    CONFIG, structs::components::{AiState, AiTarget, AnimalEntity, AnimalType, Position, Velocity}
+    structs::components::{AiState, AiTarget, AnimalEntity, AnimalType, Position, Velocity},
+    CONFIG,
 };
 use bevy_ecs::{
-    query::With, resource::Resource, system::{Query, ResMut}
+    query::With,
+    resource::Resource,
+    system::{Query, ResMut},
 };
 use nanorand::{Rng, WyRand};
 
@@ -11,13 +14,16 @@ pub struct GlobalRng(pub WyRand);
 
 pub fn animal_ai_system(
     mut rng: ResMut<GlobalRng>,
-    mut query: Query<(
-        &mut Velocity,
-        &mut Position,
-        &mut AiState,
-        &mut AiTarget,
-        &AnimalType,
-    ), With<AnimalEntity>>,
+    mut query: Query<
+        (
+            &mut Velocity,
+            &mut Position,
+            &mut AiState,
+            &mut AiTarget,
+            &AnimalType,
+        ),
+        With<AnimalEntity>,
+    >,
 ) {
     let snapshots: Vec<(Velocity, Position, AnimalType)> =
         query.iter().map(|(v, p, _, _, t)| (*v, *p, *t)).collect();

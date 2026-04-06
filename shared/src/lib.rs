@@ -1,12 +1,15 @@
+pub mod objects;
+pub mod structs;
 pub mod to_client;
 pub mod to_server;
-pub mod structs;
-pub mod objects;
 
+use crate::{
+    structs::server::{Aim, HitEvent, Move, Player},
+    to_client::{AddAnimalData, AddObjectData, HitEventTO, UpdatePlayerData},
+};
+use borsh_derive::BorshSerialize;
 #[cfg(feature = "web")]
 use serde::{Deserialize, Serialize};
-use borsh_derive::{BorshSerialize};
-use crate::{structs::server::{Move, Player, Aim}, to_client::{AddAnimalData, UpdatePlayerData}};
 
 #[derive(BorshSerialize)]
 #[cfg_attr(feature = "web", derive(Serialize, Deserialize))]
@@ -16,6 +19,8 @@ pub enum Packet {
     UpdatePlayers(UpdatePlayerData),
     AddAnimal(AddAnimalData),
     Aim(Aim),
+    HitEvent(HitEvent),
+    AddObject(AddObjectData),
 }
 
 #[repr(u8)]
@@ -27,7 +32,8 @@ pub enum PacketType {
     UpdatePlayers = 3,
     AddAnimal = 4,
     Aim = 5,
-    AddObject = 6,
+    HitEvent = 6,
+    AddObject = 7,
 }
 impl PacketType {
     pub fn from_u8(val: u8) -> Option<PacketType> {
@@ -37,7 +43,8 @@ impl PacketType {
             3 => Some(Self::UpdatePlayers),
             4 => Some(Self::AddAnimal),
             5 => Some(Self::Aim),
-            6 => Some(Self::AddObject),
+            6 => Some(Self::HitEvent),
+            7 => Some(Self::AddObject),
             _ => None,
         }
     }
