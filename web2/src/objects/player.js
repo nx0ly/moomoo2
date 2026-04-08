@@ -1,4 +1,4 @@
-import { Sprite, Text, TextStyle } from "pixi.js";
+import { Container, Graphics, Sprite, Text, TextStyle } from "pixi.js";
 import { initDecoder } from "../packetHandler";
 
 export default class Player {
@@ -37,7 +37,7 @@ export default class Player {
     world.addChild(this.sprite.arm2Sprite);
     world.addChild(this.sprite);
 
-    this.initHealthBar();
+    this.initHealthBar(world);
     this.initNameLabel(
       this.name,
       new TextStyle({
@@ -53,40 +53,20 @@ export default class Player {
         align: "center",
         letterSpacing: 0.67,
       }),
+      world
     );
   }
 
-  initNameLabel(name, nameTextStyle) {
+  initNameLabel(name, nameTextStyle, world) {
     const label = new Text({
       text: name,
       style: nameTextStyle,
     });
     label.anchor.set(0.5, 1);
     this.sprite.nameLabel = label;
+    world.addChild(label);
   }
 
-  initHealthBar() {
-    this.healthBarContainer = new Sprite();
-    this.healthBarBackground = new Sprite();
-    this.healthBar = new Sprite();
-
-    this.healthBarContainer.addChild(this.healthBarBackground);
-    this.healthBarContainer.addChild(this.healthBar);
-
-    this.healthBarBackground.width = 100;
-    this.healthBarBackground.height = 10;
-    this.healthBarBackground.tint = 0x525252;
-
-    this.healthBar.width = 100;
-    this.healthBar.height = 10;
-    this.healthBar.tint = 0x8ecc51;
-
-    this.healthBarContainer.anchor.set(0.5);
-    this.healthBarContainer.x = 0;
-    this.healthBarContainer.y = -30;
-
-    this.sprite.addChild(this.healthBarContainer);
-  }
 
   initSprites([playerTexture, arm1Texture, arm2Texture]) {
     this.sprite = new Sprite(playerTexture);
@@ -121,6 +101,9 @@ export default class Player {
       this.sprite.nameLabel.x = this.sprite._rx;
       this.sprite.nameLabel.y = this.sprite._ry - 40;
     }
+
+    this.healthBarContainer.x = this.sprite._rx;
+    this.healthBarContainer.y = this.sprite._ry + 45;
 
     this.updateArms(rotation);
 
@@ -173,5 +156,37 @@ export default class Player {
 
       this.sprite.arm2Sprite.rotation = aim - (isPunching ? extension : 0);
     }
+  }
+
+  initHealthBar(world) {
+    const W = 60, H = 6, R = 2;
+
+    this.healthBarBg = new Graphics()
+      .roundRect(-W / 2 - 3, 0 - 3, W + 6, H + 6, R + 2)
+      .fill(0x333333);
+
+    this.healthBarFg = new Graphics();
+    this._hbW = W; this._hbH = H; this._hbR = R;
+    this._drawBar(1.0);
+
+    this.healthBarContainer = new Container();
+    this.healthBarContainer.addChild(this.healthBarBg);
+    this.healthBarContainer.addChild(this.healthBarFg);
+
+    world.addChild(this.healthBarContainer);
+  }
+
+  _drawBar(ratio) {
+    const { _hbW: W, _hbH: H, _hbR: R } = this;
+    const color = ratio > 0.5 ? 0x8ecc51 : ratio > 0.25 ? 0xf0a30a : 0xe74c3c;
+    const w = Math.max(0, W * ratio);
+    this.healthBarFg.clear();
+    if (w > 0) {
+      this.healthBarFg.roundRect(-W / 2, 0, w, H, Math.min(R, w / 2)).fill(color);
+    }
+  }
+
+  setHealth(current, max) {
+    this._drawBar(Math.max(0, current / max));
   }
 }

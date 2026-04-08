@@ -2,7 +2,7 @@ use serde::Serialize;
 use shared::structs::client::{JsAim, JsHitEvent};
 use shared::structs::server::HitEvent;
 use shared::to_client::{
-    AddAnimalData, AddObjectData, AddPlayerData, HitEventTO, UpdatePlayerData,
+    AddAnimalData, AddObjectData, AddPlayerData, HitEventTO, UpdateHealthData, UpdatePlayerData,
 };
 use shared::to_server::{AimMessage, ClientMessages, HitMessage, MoveMessage};
 use shared::{
@@ -24,10 +24,6 @@ use pqc_kyber::{
 };
 use sha2::Sha256;
 use x25519_dalek::{PublicKey, StaticSecret};
-
-// TODO: remove dependency on serde_wasm_bindgen
-// its kinda slow
-// use share memory
 
 #[derive(BorshSerialize, BorshDeserialize)]
 struct ClientHello {
@@ -58,25 +54,41 @@ impl SessionCrypto {
 
     #[wasm_bindgen]
     pub fn encrypt(&mut self, plaintext: &[u8]) -> Result<Vec<u8>, JsValue> {
-        let nonce = Self::make_nonce(self.send_nonce);
+        let nonce_value = self.send_nonce;
         self.send_nonce = self.send_nonce.wrapping_add(1);
 
-        self.cipher
+        let nonce = Self::make_nonce(nonce_value);
+
+        let ciphertext = self
+            .cipher
             .encrypt(&nonce, plaintext)
-            .map_err(|e| JsValue::from_str(&format!("encryption failed: {}", e)))
+            .map_err(|e| JsValue::from_str(&format!("encryption failed: {}", e)))?;
+
+        let mut packet = nonce_value.to_be_bytes().to_vec();
+        packet.extend(ciphertext);
+
+        Ok(packet)
     }
 
     #[wasm_bindgen]
-    pub fn decrypt(&mut self, ciphertext: &[u8]) -> Result<Vec<u8>, JsValue> {
-        let nonce = Self::make_nonce(self.recv_nonce);
+    pub fn decrypt(&self, packet: &[u8]) -> Result<Vec<u8>, JsValue> {
+        if packet.len() < 8 {
+            return Err(JsValue::from_str("packet too small"));
+        }
 
-        let plaintext = self
-            .cipher
+        let (nonce_bytes, ciphertext) = packet.split_at(8);
+
+        let nonce_value = u64::from_be_bytes(
+            nonce_bytes
+                .try_into()
+                .map_err(|_| JsValue::from_str("invalid nonce"))?,
+        );
+
+        let nonce = Self::make_nonce(nonce_value);
+
+        self.cipher
             .decrypt(&nonce, ciphertext)
-            .map_err(|e| JsValue::from_str(&format!("decryption failed: {}", e)))?;
-
-        self.recv_nonce = self.recv_nonce.wrapping_add(1);
-        Ok(plaintext)
+            .map_err(|e| JsValue::from_str(&format!("decryption failed: {}", e)))
     }
 
     // debug stuff
@@ -277,6 +289,13 @@ fn decode_bytes_inner(bytes: &[u8]) -> Result<JsValue, JsValue> {
             }
             Some(PacketType::HitEvent) => {
                 let data = borsh::from_slice::<HitEventTO>(&bytes[1..])
+                    .map_err(|e| JsValue::from_str(&format!("error decoding move {}", e)))?;
+                let packet = DecodedPacket { code: *code, data };
+                Ok(serde_wasm_bindgen::to_value(&packet)
+                    .map_err(|e| JsValue::from_str(&e.to_string()))?)
+            }
+            Some(PacketType::UpdateHealth) => {
+                let data = borsh::from_slice::<UpdateHealthData>(&bytes[1..])
                     .map_err(|e| JsValue::from_str(&format!("error decoding move {}", e)))?;
                 let packet = DecodedPacket { code: *code, data };
                 Ok(serde_wasm_bindgen::to_value(&packet)

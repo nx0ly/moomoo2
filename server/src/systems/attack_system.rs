@@ -63,6 +63,10 @@ pub fn attack_system(
             //     });
             // }
 
+            hit_events.0.push(HitEvent {
+        attacker: attacker_id,
+        affected: vec![],  // empty is fine, server only uses attacker for packet 6
+    });
             reload_state.0 = reload_state.1;
         }
     }

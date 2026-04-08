@@ -97,4 +97,11 @@ pub struct AddAnimalData {
     pub animals: Vec<AnimalTO>,
 }
 
+#[derive(Debug, Clone, BorshDeserialize, BorshSerialize)]
+#[cfg_attr(feature = "web", derive(Serialize, Deserialize))]
+pub struct UpdateHealthData {
+    pub id: u32,
+    pub new_health: f32,
+}
+
 // send animials packets to client and render to make sure fishes and animal systems work

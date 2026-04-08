@@ -1,12 +1,9 @@
-import init, {
-  encode_into_bytes,
-  HandshakeState,
-  SessionCrypto,
-} from "../parser/pkg/parser";
+import init, { encode_into_bytes, HandshakeState } from "../parser/pkg/parser";
 import { Render } from "./render/renderer";
 import utils from "./utils";
 import Player from "./objects/player";
 import { decodePacket, initDecoder } from "./packetHandler";
+import { ActionBar } from "./ui/actionBar";
 
 export class Game {
   constructor() {
@@ -24,9 +21,7 @@ export class Game {
 
     this.lastAimDir = 0;
 
-    this.utils = {
-      game: this,
-    };
+    this.utils = { game: this };
     utils.bind(this.utils)();
   }
 
@@ -35,7 +30,6 @@ export class Game {
     await initDecoder();
     await this.renderer.init();
 
-    // hooks
     document.getElementById("goButton").addEventListener("click", async () => {
       await this.enterGame();
     });
@@ -44,57 +38,102 @@ export class Game {
     await this.wt.ready;
     console.log("wt connected");
 
-    this.stream = await this.wt.createBidirectionalStream();
-    this.sender = this.stream.writable.getWriter();
-    this.reader = this.stream.readable.getReader();
+    this.datagramWriter = this.wt.datagrams.writable.getWriter();
+    this.datagramReader = this.wt.datagrams.readable.getReader();
 
     console.log("starting handshake");
 
-    const handshake = HandshakeState.create_client_hello();
-    const clientHelloBytes = handshake.message();
+    const handshakeAndMsg = HandshakeState.create_client_hello();
+    const clientHelloBytes = handshakeAndMsg.message();
 
     const helloFramed = new ArrayBuffer(4 + clientHelloBytes.byteLength);
     new DataView(helloFramed).setUint32(0, clientHelloBytes.byteLength, false);
     new Uint8Array(helloFramed, 4).set(clientHelloBytes);
-    await this.sender.write(new Uint8Array(helloFramed));
+
+    const stream = await this.wt.createBidirectionalStream();
+    this.streamWriter = stream.writable.getWriter();
+    this.streamReader = stream.readable.getReader();
+    await this.streamWriter.write(new Uint8Array(helloFramed));
     console.log("sent ClientHello");
 
     let handshakeBuffer = new Uint8Array(0);
-    while (handshakeBuffer.length < 4) {
-      const { value, done } = await this.reader.read();
-      if (done) throw new Error("connection closed during handshake");
-      const merged = new Uint8Array(handshakeBuffer.length + value.length);
-      merged.set(handshakeBuffer);
-      merged.set(value, handshakeBuffer.length);
-      handshakeBuffer = merged;
-    }
+
+    const readExact = async (n) => {
+      while (handshakeBuffer.length < n) {
+        const { value, done } = await this.streamReader.read();
+        if (done) throw new Error("connection closed during handshake");
+        const merged = new Uint8Array(handshakeBuffer.length + value.length);
+        merged.set(handshakeBuffer);
+        merged.set(value, handshakeBuffer.length);
+        handshakeBuffer = merged;
+      }
+    };
+
+    await readExact(4);
     const serverHelloLen = new DataView(handshakeBuffer.buffer).getUint32(
       0,
       false,
     );
-    while (handshakeBuffer.length < 4 + serverHelloLen) {
-      const { value, done } = await this.reader.read();
-      if (done) throw new Error("connection closed during handshake");
-      const merged = new Uint8Array(handshakeBuffer.length + value.length);
-      merged.set(handshakeBuffer);
-      merged.set(value, handshakeBuffer.length);
-      handshakeBuffer = merged;
-    }
-    this.crypto = handshake.complete_handshake(
+    await readExact(4 + serverHelloLen);
+
+    this.crypto = handshakeAndMsg.complete_handshake(
       handshakeBuffer.slice(4, 4 + serverHelloLen),
     );
-    console.log("handshake finished");
+    console.log("handshake complete");
     console.log(`send nonce: ${this.crypto.get_send_nonce()}`);
     console.log(`receive nonce: ${this.crypto.get_recv_nonce()}`);
 
+    this.streamWriter.close().catch(() => {});
+    this.streamReader.cancel().catch(() => {});
+
     window.addEventListener("keydown", this.handleKey);
-    window.addEventListener("mousemove", this.handleMouseMove);
     window.addEventListener("keyup", this.handleKey);
+    window.addEventListener("mousemove", this.handleMouseMove);
     window.addEventListener("wheel", this.handleWheel, { passive: true });
     window.addEventListener("mousedown", this.handleMousedown);
     window.addEventListener("mouseup", this.handleMousedown);
 
-    this.read();
+    this.read().catch((e) => console.error("read loop died:", e));
+
+    this.readReliable().catch((e) =>
+      console.error("reliable read loop died:", e),
+    );
+  }
+
+  async readReliable() {
+    const reader = this.wt.incomingUnidirectionalStreams.getReader();
+    while (true) {
+      const { value: stream, done } = await reader.read();
+      console.log("ok", stream);
+      if (done) break;
+
+      const chunks = [];
+      const streamReader = stream.getReader();
+      while (true) {
+        const { value: chunk, done: streamDone } = await streamReader.read();
+        if (streamDone) break;
+        chunks.push(chunk);
+      }
+
+      const totalLen = chunks.reduce((n, c) => n + c.length, 0);
+      const buf = new Uint8Array(totalLen);
+      let offset = 0;
+      for (const chunk of chunks) {
+        buf.set(chunk, offset);
+        offset += chunk.length;
+      }
+
+      if (buf.length < 4) continue;
+      const payload = buf.slice(4); // rest is: [nonce:8 | ciphertext]
+
+      try {
+        const plaintext = this.crypto.decrypt(payload);
+        const packet = decodePacket(plaintext);
+        this.handlePacket(packet);
+      } catch (e) {
+        console.error("reliable decrypt/decode error:", e);
+      }
+    }
   }
 
   handleKey = (e) => {
@@ -103,21 +142,22 @@ export class Game {
     if (e.key === "s" || e.key === "ArrowDown") this.moveInput.down = down;
     if (e.key === "a" || e.key === "ArrowLeft") this.moveInput.left = down;
     if (e.key === "d" || e.key === "ArrowRight") this.moveInput.right = down;
-
     this.sendInput();
   };
 
-  handleMousedown = async (e) => {
+  handleMousedown = async (_e) => {
     await this.sendEncrypted({}, 6);
   };
 
   handleMouseMove = (e) => {
     const cx = window.innerWidth / 2;
     const cy = window.innerHeight / 2;
-    let aim = Math.atan2(e.clientY - cy, e.clientX - cx);
-
-    if (this.lastAimDir == aim) return;
+    const aim = Math.atan2(e.clientY - cy, e.clientX - cx);
+    if (this.lastAimDir === aim) return;
     this.lastAimDir = aim;
+    // aim is sent piggy-backed on every position update from the server (case 3),
+    // but also send immediately for responsiveness.
+    this.sendAim(aim).catch(() => {});
   };
 
   handleWheel = (e) => {
@@ -144,91 +184,52 @@ export class Game {
       dir = Math.atan2(dy, dx);
     }
 
-    if (this.lastMoveDir == dir) return;
+    if (this.lastMoveDir === dir) return;
     this.lastMoveDir = dir;
-
-    this.sendMove(dir);
+    this.sendMove(dir).catch(() => {});
   };
 
   async enterGame() {
-    const spawnData = {
-      name: document.getElementById("nameInput").value,
-    };
-
+    const spawnData = { name: document.getElementById("nameInput").value };
     await this.sendEncrypted(spawnData, 1);
     console.log("spawn msg sent");
-
     document.getElementById("mainMenuContainer").remove();
     document.getElementById("darkener").remove();
-    // document.getElementById("vignette").remove();
   }
 
   async sendEncrypted(data, opcode) {
-    if (!this.crypto || !this.sender) {
-      throw new Error("cannot send - encryption not initialized");
+    if (!this.crypto || !this.datagramWriter) {
+      throw new Error("cannot send — encryption not initialised");
     }
-
-    try {
-      const plaintext = encode_into_bytes(data, opcode);
-      const ciphertext = this.crypto.encrypt(plaintext);
-      const buf = new ArrayBuffer(4 + ciphertext.byteLength);
-      new DataView(buf).setUint32(0, ciphertext.byteLength, false);
-      new Uint8Array(buf, 4).set(ciphertext);
-      await this.sender.write(new Uint8Array(buf));
-    } catch (e) {
-      console.error("failed to send encrypted message:", e);
-      throw e;
-    }
+    const plaintext = encode_into_bytes(data, opcode);
+    // crypto.encrypt() → Uint8Array of [ nonce(8) | ciphertext ]
+    const packet = this.crypto.encrypt(plaintext);
+    await this.datagramWriter.write(packet);
   }
 
   async read() {
-    const buf = new Uint8Array(4096);
-    let buffered = new Uint8Array(0);
+    while (true) {
+      const { value, done } = await this.datagramReader.read();
+      if (done) break;
+      if (!value || value.length < 9) continue; // 8 nonce + ≥1 ciphertext byte
 
-    try {
-      while (true) {
-        const { value, done } = await this.reader.read();
-        if (done) break;
-        if (!value) continue;
-
-        const newBuf = new Uint8Array(buffered.length + value.length);
-        newBuf.set(buffered);
-        newBuf.set(value, buffered.length);
-        buffered = newBuf;
-
-        while (buffered.length >= 4) {
-          const len = new DataView(
-            buffered.buffer,
-            buffered.byteOffset,
-          ).getUint32(0, false);
-
-          if (buffered.length < 4 + len) break;
-
-          const ciphertext = buffered.slice(4, 4 + len);
-          buffered = buffered.slice(4 + len);
-
-          try {
-            const plaintext = this.crypto.decrypt(ciphertext);
-            const packet = decodePacket(plaintext);
-            this.handlePacket(packet);
-          } catch (e) {
-            console.error("decrypt error:", e);
-          }
-        }
+      try {
+        const plaintext = this.crypto.decrypt(value);
+        const packet = decodePacket(plaintext);
+        this.handlePacket(packet);
+      } catch (e) {
+        console.error("decrypt/decode error:", e);
       }
-    } catch (e) {
-      console.error("stream error:", e);
     }
+    console.warn("datagram reader closed");
   }
 
   handlePacket(packet) {
     switch (packet.code) {
-      case 1:
+      case 1: {
         console.log("player spawned:", packet.data);
-
-        let { is_mine, data } = packet.data;
-
-        let player = new Player(
+        const { is_mine, data } = packet.data;
+        const player = new Player(
           data,
           [
             this.renderer.textures.player_texture,
@@ -237,35 +238,31 @@ export class Game {
           ],
           this.renderer.world,
         );
-
         this.players.push(player);
-
         if (is_mine) {
           this.my_player = player;
+          window.actionBar = new ActionBar();
         }
-
         break;
+      }
 
-      case 3:
-        let { players } = packet.data;
-        for (let p of players) {
-          let player = this.utils.findPlayerByID(p.id);
-
+      case 3: {
+        const { players } = packet.data;
+        for (const p of players) {
+          const player = this.utils.findPlayerByID(p.id);
           if (!player) continue;
-
           player.x = p.x;
           player.y = p.y;
           player.weapon = p.weapon;
           player.lastAim = p.aim;
           player.aim = p.aim;
-
           player.sprite.x = p.x;
           player.sprite.y = p.y;
         }
 
-        this.sendAim(this.lastAimDir);
-
+        this.sendAim(this.lastAimDir).catch(() => {});
         break;
+      }
 
       case 4:
         this.animals = packet.data.animals.map((a) => ({
@@ -274,18 +271,20 @@ export class Game {
           y: a.y,
           type: a.animal_type,
         }));
-        // console.log(this.renderer.animals[0]) //we already know its bad gng
         break;
 
-      case 6:
-        console.log(packet.data.entity_id);
-        let playeraa = this.utils.findPlayerByID(packet.data.entity_id);
-        playeraa.attackAnim = 1;
-        playeraa.animateRightArm = !playeraa.animateRightArm;
+      case 6: {
+        console.log("hit event, entity:", packet.data.entity_id);
+        const player = this.utils.findPlayerByID(packet.data.entity_id);
+        if (player) {
+          player.attackAnim = 1;
+          player.animateRightArm = !player.animateRightArm;
+        }
         break;
+      }
 
       case 7:
-        console.error(packet.data);
+        console.log("objects:", packet);
         this.objects = packet.data.objects;
         break;
 
@@ -295,28 +294,29 @@ export class Game {
   }
 
   async sendMove(direction) {
-    const moveData = { dir: direction };
-    await this.sendEncrypted(moveData, 2);
+    await this.sendEncrypted({ dir: direction }, 2);
   }
 
   async sendAim(direction) {
-    const aimData = { dir: direction };
-    await this.sendEncrypted(aimData, 5);
+    await this.sendEncrypted({ dir: direction }, 5);
   }
 
   cleanup() {
-    console.log("cleaning up stuff");
+    window.removeEventListener("keydown", this.handleKey);
+    window.removeEventListener("keyup", this.handleKey);
+    window.removeEventListener("mousemove", this.handleMouseMove);
+    window.removeEventListener("wheel", this.handleWheel);
+    window.removeEventListener("mousedown", this.handleMousedown);
+    window.removeEventListener("mouseup", this.handleMousedown);
 
-    if (this.sender) {
-      this.sender.releaseLock();
-      this.sender = null;
+    if (this.datagramWriter) {
+      this.datagramWriter.releaseLock();
+      this.datagramWriter = null;
     }
-
-    if (this.reader) {
-      this.reader.releaseLock();
-      this.reader = null;
+    if (this.datagramReader) {
+      this.datagramReader.cancel();
+      this.datagramReader = null;
     }
-
     if (this.wt) {
       this.wt.close();
       this.wt = null;
@@ -326,12 +326,11 @@ export class Game {
   }
 
   isConnected() {
-    return this.crypto !== null && this.sender !== null;
+    return this.crypto !== null && this.datagramWriter !== null;
   }
 
   getDebugInfo() {
     if (!this.crypto) return null;
-
     return {
       sendNonce: this.crypto.get_send_nonce(),
       recvNonce: this.crypto.get_recv_nonce(),
@@ -342,191 +341,4 @@ export class Game {
 
 const game = new Game();
 await game.init();
-
-console.log("why ass");
-var ui = 0;
-var mi = [
-  function () {
-    return "<div class='infoHeader'>Customize</div><div class='menuSelector' onclick='showSelectScreen(0, this)'>Headgear</div><div class='menuSelector' onclick='showSelectScreen(1, this)'>Clothing</div>";
-  },
-  function () {
-    let h = null;
-    h.fetchServerList().then((e) => {
-      var t = "";
-      var i = 0;
-      for (var s in e) {
-        for (var n = e[s], o = 0, r = 0; r < n.length; r++) {
-          o += n[r].players;
-        }
-        i += o;
-        let p = h.regionInfo[s].name;
-        t += "<b>" + p + " - " + o + " players</b>";
-        for (let e = 0; e < n.length; e++) {
-          var l = n[e];
-          var c = a && a.instanceId == l.id;
-          var d =
-            p +
-            " " +
-            (e + 1) +
-            " - " +
-            l.players +
-            "/" +
-            l.maxPlayers +
-            " players";
-          var f = c ? "&#x25B6; " : "";
-          t +=
-            "<div class='" +
-            (c ? "selectedMenuSelector" : "subMenuSelector") +
-            "' onclick='switchServer(\"" +
-            l.id +
-            "\")'>" +
-            f +
-            d +
-            "</div>";
-        }
-        t += "<br/>";
-      }
-      t += "<b>" + i + " total players</b>";
-      let p = document.getElementById("serverList");
-      if (p) {
-        p.innerHTML = t;
-      }
-    });
-    return "<div class='infoHeader'>Servers</div><div id='serverList' class='infoText'>Loading...</div>";
-  },
-  function () {
-    if (m) {
-      return (
-        "<div class='infoHeader'>Account</div><div class='accItem'>If you leave a game in progress your stats won't be saved</div><div class='accItem'><b>Name </b> " +
-        m.name +
-        "</div><div class='accItem'><b>Level </b> " +
-        m.level +
-        "</div><div class='accItem'><b>Tokens </b> " +
-        m.tokens +
-        "</div><div class='accItem'><b>Most Kills </b> " +
-        m.maxKills +
-        "</div><div class='accItem'><b>Kills </b> " +
-        m.kills +
-        "</div><div class='accItem'><b>Deaths </b> " +
-        m.deaths +
-        "</div><div class='accItem'><b>KDR </b> " +
-        (m.kills / m.deaths).round(2) +
-        "</div><div class='accItem'><b>Games </b> " +
-        m.games +
-        "</div><div class='accItem'><b>Wins </b> " +
-        m.wins +
-        "</div><div class='menuButton accButton' style='margin-top:10px' onclick='logoutAcc()'>Logout</div>"
-      );
-    } else {
-      return (
-        "<div class='infoHeader'>Login</div><div id='accResp' style='display:none'></div><input type='text' id='accName' class='accInput' maxlength='" +
-        n.maxNameLength +
-        "' placeholder='Username' value='" +
-        (De("foes_username") || "") +
-        "' ontouchend='touchPrompt(event, \"Enter username:\")'></input><input type='text' id='accEmail' class='accInput' maxlength='" +
-        n.maxEmailLength +
-        "'placeholder='Email' ontouchend='touchPrompt(event, \"Enter email:\")'></input><input type='password' id='accPass' class='accInput' maxlength='" +
-        n.maxPassLength +
-        "'placeholder='Password' ontouchend='touchPrompt(event, \"Enter password:\")'></input><div class='menuButton accButton' style='margin-bottom:10px' onclick='loginAcc()'>Login</div><div class='menuButton accButton' onclick='registerAcc()'>Register</div>"
-      );
-    }
-  },
-  function () {
-    var e =
-      "<div class='infoHeader'>How to Play</div><div class='infoText'>The last player alive wins</br>";
-    for (var t = gi.desktop, i = 0; i < t.length; i++) {
-      var a = t[i];
-      e += "<b>" + a[0] + "</b> " + a[1] + "</br>";
-    }
-    e +=
-      "<span id='createContainerMobile'>Created by <a href='https://web.archive.org/web/20181212084011/https://twitter.com/Sidney_de_Vries'>Sidney</a> & <a href='https://web.archive.org/web/20181212084011/https://twitter.com/EatMyAppless'>Vincent</a></span>";
-    return (e += "</div>");
-  },
-  function () {
-    var e = "<div class='infoHeader'>Settings</div>";
-    for (var t = 0; t < Ze.length; ++t) {
-      e +=
-        "<div class='menuSelector' id='settingButton" +
-        t +
-        "' onclick='toggleSetting(" +
-        t +
-        ")'>" +
-        Qe(Ze[t].val) +
-        Ze[t].display +
-        "</div>";
-    }
-    return e;
-  },
-];
-function yi(e, t) {
-  ui = e;
-  infoCard.innerHTML =
-    "<div class='menuButton infoBack' onclick='hideInfoScreen()'>Back</div>" +
-    mi[e]();
-  if (!t) {
-    infoCardParent.classList.toggle("submenuShowing", true);
-    buttonCardParent.classList.toggle("submenuShowing", true);
-  }
-}
-window.showInfoScreen = yi;
-var Ze = [
-  {
-    name: "showBlood",
-    display: "Show Blood",
-    val: true,
-  },
-  {
-    name: "showLeaves",
-    display: "Show Leaves",
-    val: true,
-  },
-  {
-    name: "showParticles",
-    display: "Show Particles",
-    val: true,
-  },
-  {
-    name: "showChat",
-    display: "Show Chat",
-    val: true,
-  },
-  {
-    name: "showUI",
-    display: "Show UI",
-    val: true,
-  },
-  {
-    name: "nativeResolution",
-    display: "Use native resolution (needs reload)",
-    val: true,
-    onChange: function (e) {
-      location.reload();
-    },
-  },
-];
-
-function Qe(e) {
-  return (e ? "✔" : "✖") + " ";
-}
-
-var gi = {
-  desktop: [
-    ["Movement:", "W,A,S,D"],
-    ["Sprint:", "Shift"],
-    ["Aim:", "Mouse"],
-    ["Interact:", "F"],
-    ["Attack:", "Left Mouse or E"],
-    ["Toggle Weapon:", "Scroll or Q"],
-    ["Drop Weapon:", "C"],
-    ["Voice to Text Chat:", "V"],
-  ],
-  touch: [
-    ["Movement:", "Left control"],
-    ["Sprint:", "Drag left control to edge"],
-    ["Aim:", "Right control"],
-    ["Attack:", "Drag right control to edge"],
-    ["Interact:", "Touch center of screen"],
-    ["Toggle Weapon:", "Touch weapon box in bottom left"],
-    ["Drop Weapon:", "Touch ammo display in bottom right"],
-  ],
-};
+console.log("game ready");

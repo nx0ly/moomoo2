@@ -12,8 +12,6 @@ use rapier2d::{
     },
     prelude::SharedShape,
 };
-use rayon::iter::IntoParallelRefIterator;
-use std::collections::HashMap;
 
 use crate::structs::components::Position;
 use crate::structs::quadtree::{Point, Quadtree, Rect};
