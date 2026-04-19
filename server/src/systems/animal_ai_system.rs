@@ -1,16 +1,29 @@
 use crate::{
-    structs::components::{AiState, AiTarget, AnimalEntity, AnimalType, Position, Velocity},
+    structs::{
+        components::{AiState, AiTarget, AnimalEntity, AnimalType, Position, Velocity},
+        quadtree::{Point, Quadtree, Rect},
+    },
+    systems::{Collider, NonReactiveCollider},
     CONFIG,
 };
 use bevy_ecs::{
     query::With,
     resource::Resource,
     system::{Query, ResMut},
+    world::World,
 };
 use nanorand::{Rng, WyRand};
 
 #[derive(Resource)]
 pub struct GlobalRng(pub WyRand);
+
+const VISUAL_RANGE: f32 = 200.0; // sqrt(40000)
+const VISUAL_RANGE_SQ: f32 = 40000.0;
+const PROTECTED_RANGE_SQ: f32 = 900.0;
+const SEPARATION_FACTOR: f32 = 0.8;
+const ALIGNMENT_FACTOR: f32 = 0.08;
+const COHESION_FACTOR: f32 = 0.008;
+const WANDER_STRENGTH: f32 = 0.05;
 
 pub fn animal_ai_system(
     mut rng: ResMut<GlobalRng>,
@@ -27,6 +40,19 @@ pub fn animal_ai_system(
 ) {
     let snapshots: Vec<(Velocity, Position, AnimalType)> =
         query.iter().map(|(v, p, _, _, t)| (*v, *p, *t)).collect();
+
+    // build quadtree once from snapshots
+    let boundary = Rect::new(0.0, 0.0, 16384.0, 16384.0);
+    let mut qtree = Quadtree::new(boundary, 6);
+    for (i, (_, pos, animal_type)) in snapshots.iter().enumerate() {
+        if matches!(animal_type, AnimalType::Fish) {
+            qtree.insert(Point {
+                x: pos.0,
+                y: pos.1,
+                index: i,
+            });
+        }
+    }
 
     for (mut vel, mut pos, state, mut target, animal_type) in query.iter_mut() {
         match *state {
@@ -48,35 +74,31 @@ pub fn animal_ai_system(
 
                     let dist = dist_sq.sqrt();
                     if dist > 0. {
-                        let spd = 35.0;
-                        vel.0 = (dx / dist) * spd;
-                        vel.1 = (dy / dist) * spd;
+                        vel.0 = (dx / dist) * 35.0;
+                        vel.1 = (dy / dist) * 35.0;
                     }
                 }
 
                 AnimalType::Fish => {
-                    // move to config later
-                    const VISUAL_RANGE_SQ: f32 = 40000.0;
-                    const PROTECTED_RANGE_SQ: f32 = 900.0;
-
-                    const SEPARATION_FACTOR: f32 = 0.8;
-                    const ALIGNMENT_FACTOR: f32 = 0.08;
-                    const COHESION_FACTOR: f32 = 0.008;
-                    const WANDER_STRENGTH: f32 = 0.05;
-
                     let mut neighbor_count = 0;
+                    let mut close_dx = 0.0_f32;
+                    let mut close_dy = 0.0_f32;
+                    let mut avg_vel_x = 0.0_f32;
+                    let mut avg_vel_y = 0.0_f32;
+                    let mut center_x = 0.0_f32;
+                    let mut center_y = 0.0_f32;
 
-                    let mut close_dx = 0.0;
-                    let mut close_dy = 0.0;
-                    let mut avg_vel_x = 0.0;
-                    let mut avg_vel_y = 0.0;
-                    let mut center_x = 0.0;
-                    let mut center_y = 0.0;
+                    let search = Rect::new(
+                        pos.0 - VISUAL_RANGE,
+                        pos.1 - VISUAL_RANGE,
+                        VISUAL_RANGE * 2.0,
+                        VISUAL_RANGE * 2.0,
+                    );
+                    let mut nearby = Vec::with_capacity(32);
+                    qtree.query(&search, &mut nearby);
 
-                    for (other_vel, other_pos, other_type) in &snapshots {
-                        if !matches!(other_type, AnimalType::Fish) {
-                            continue;
-                        }
+                    for point in &nearby {
+                        let (other_vel, other_pos, _) = &snapshots[point.index];
 
                         let dx = pos.0 - other_pos.0;
                         let dy = pos.1 - other_pos.1;
@@ -96,7 +118,6 @@ pub fn animal_ai_system(
 
                         avg_vel_x += other_vel.0;
                         avg_vel_y += other_vel.1;
-
                         center_x += other_pos.0;
                         center_y += other_pos.1;
                     }
@@ -105,20 +126,11 @@ pub fn animal_ai_system(
                         vel.0 += close_dx * SEPARATION_FACTOR;
                         vel.1 += close_dy * SEPARATION_FACTOR;
 
-                        avg_vel_x /= neighbor_count as f32;
-                        avg_vel_y /= neighbor_count as f32;
-
-                        vel.0 += (avg_vel_x - vel.0) * ALIGNMENT_FACTOR;
-                        vel.1 += (avg_vel_y - vel.1) * ALIGNMENT_FACTOR;
-
-                        center_x /= neighbor_count as f32;
-                        center_y /= neighbor_count as f32;
-
-                        let to_center_x = center_x - pos.0;
-                        let to_center_y = center_y - pos.1;
-
-                        vel.0 += to_center_x * COHESION_FACTOR;
-                        vel.1 += to_center_y * COHESION_FACTOR;
+                        let n = neighbor_count as f32;
+                        vel.0 += (avg_vel_x / n - vel.0) * ALIGNMENT_FACTOR;
+                        vel.1 += (avg_vel_y / n - vel.1) * ALIGNMENT_FACTOR;
+                        vel.0 += (center_x / n - pos.0) * COHESION_FACTOR;
+                        vel.1 += (center_y / n - pos.1) * COHESION_FACTOR;
                     }
 
                     let wander_angle = (rng.0.generate::<f32>() - 0.5) * 0.5;
@@ -131,7 +143,6 @@ pub fn animal_ai_system(
                         let new_vy = vel.0 * sin_a + vel.1 * cos_a;
                         vel.0 = new_vx;
                         vel.1 = new_vy;
-
                         vel.0 += (vel.0 / speed) * WANDER_STRENGTH;
                         vel.1 += (vel.1 / speed) * WANDER_STRENGTH;
                     } else {
@@ -139,18 +150,17 @@ pub fn animal_ai_system(
                         vel.1 += rng.0.generate::<f32>() - 0.5;
                     }
 
-                    let final_speed_sq = vel.0 * vel.0 + vel.1 * vel.1;
-                    let max_speed = 60.0;
-                    let min_speed = 20.0;
-
-                    if final_speed_sq > max_speed * max_speed {
-                        let scale = max_speed / final_speed_sq.sqrt();
-                        vel.0 *= scale;
-                        vel.1 *= scale;
-                    } else if final_speed_sq < min_speed * min_speed && final_speed_sq > 0.0 {
-                        let scale = min_speed / final_speed_sq.sqrt();
-                        vel.0 *= scale;
-                        vel.1 *= scale;
+                    let speed_sq = vel.0 * vel.0 + vel.1 * vel.1;
+                    const MAX_SPD: f32 = 60.0;
+                    const MIN_SPD: f32 = 20.0;
+                    if speed_sq > MAX_SPD * MAX_SPD {
+                        let s = MAX_SPD / speed_sq.sqrt();
+                        vel.0 *= s;
+                        vel.1 *= s;
+                    } else if speed_sq < MIN_SPD * MIN_SPD && speed_sq > 0.0 {
+                        let s = MIN_SPD / speed_sq.sqrt();
+                        vel.0 *= s;
+                        vel.1 *= s;
                     }
                 }
             },
@@ -161,7 +171,6 @@ pub fn animal_ai_system(
         let max_x = CONFIG.map.ocean_end_x as f32;
         let min_y = 0.0;
         let max_y = CONFIG.map.size as f32;
-        let turn_factor = CONFIG.animals.fish_turn_factor;
 
         pos.0 += vel.0;
         pos.1 += vel.1;
@@ -194,10 +203,37 @@ pub fn animal_ai_system(
             vel.1 -= 2.0;
         }
 
-        pos.0 = pos.0.clamp(
-            CONFIG.map.ocean_start_x as f32,
-            CONFIG.map.ocean_end_x as f32,
-        );
-        pos.1 = pos.1.clamp(0.0, CONFIG.map.size as f32);
+        pos.0 = pos.0.clamp(min_x, max_x);
+        pos.1 = pos.1.clamp(min_y, max_y);
+    }
+}
+
+pub fn init_animals(world: &mut World, rng: &mut GlobalRng) {
+    let min_x = CONFIG.map.ocean_start_x as f32;
+    let max_x = CONFIG.map.ocean_end_x as f32;
+    let min_y = 0.0;
+    let max_y = CONFIG.map.size as f32;
+
+    for _ in 0..(2_i32.pow(12)) {
+        let x = min_x + (rng.0.generate::<f32>() * (max_x - min_x));
+        let y = min_y + (rng.0.generate::<f32>() * (max_y - min_y));
+
+        world.spawn((
+            Position(x, y),
+            Velocity(
+                (rng.0.generate::<f32>() - 0.5) * 50.0,
+                (rng.0.generate::<f32>() - 0.5) * 50.0,
+            ),
+            AiState::Wander,
+            AiTarget(
+                None,
+                x + (rng.0.generate::<f32>() - 0.5) * 100.0,
+                y + (rng.0.generate::<f32>() - 0.5) * 100.0,
+            ),
+            AnimalType::Fish,
+            AnimalEntity,
+            Collider::circle(35.0),
+            NonReactiveCollider,
+        ));
     }
 }

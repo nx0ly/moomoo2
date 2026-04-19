@@ -25,6 +25,23 @@ pub struct Player {
     pub weapon_index: Option<u8>,
 }
 
+impl Player {
+    pub fn new(name: String, id: u8) -> Self {
+        Self {
+            name,
+            id,
+            x: 10000.,
+            y: 10000.,
+            vx: 0.0, 
+            vy: 0.0,
+            move_dir: None,
+            attacked: false,
+            aim: 0.0,
+            weapon_index: Some(0)
+        }
+    }
+}
+
 #[cfg(feature = "web")]
 impl From<JsPlayer> for Player {
     fn from(value: JsPlayer) -> Self {
@@ -75,6 +92,12 @@ pub struct Move {
 #[cfg_attr(feature = "web", derive(Serialize, Deserialize))]
 pub struct Aim {
     pub dir: Option<f32>,
+}
+
+#[derive(Debug, Clone, BorshDeserialize, BorshSerialize)]
+#[cfg_attr(feature = "web", derive(Serialize, Deserialize))]
+pub struct SetWeapons {
+    pub weapons: Vec<u8>,
 }
 
 #[derive(Debug, Clone, BorshDeserialize, BorshSerialize)]

@@ -7,7 +7,7 @@ use borsh_derive::{BorshDeserialize, BorshSerialize};
 
 #[cfg(feature = "web")]
 // use crate::structs::server::GameObject;
-use crate::structs::server::{Aim, GameObject, HitEvent, Move, Player};
+use crate::structs::server::{Aim, GameObject, HitEvent, Move, Player, SetWeapons};
 
 #[cfg(feature = "web")]
 #[wasm_bindgen]
@@ -141,5 +141,26 @@ pub struct JsAim {
 impl From<Aim> for JsAim {
     fn from(value: Aim) -> Self {
         Self { dir: value.dir }
+    }
+}
+
+#[cfg(feature = "web")]
+#[wasm_bindgen]
+#[derive(BorshSerialize, Deserialize, Serialize)]
+pub struct JsSetWeapons {
+    weapons: Vec<u8>,
+}
+
+#[cfg(feature = "web")]
+impl From<SetWeapons> for JsSetWeapons {
+    fn from(value: SetWeapons) -> Self {
+        Self { weapons: value.weapons }
+    }
+}
+
+#[cfg(feature = "web")]
+impl JsSetWeapons {
+    pub fn get_set_weapons(&self) -> Vec<u8> {
+        self.weapons.clone()
     }
 }

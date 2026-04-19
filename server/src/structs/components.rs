@@ -153,5 +153,10 @@ pub struct HitEvents(pub Vec<HitEvent>);
 
 pub struct HitEvent {
     pub attacker: Entity,
+    pub attacker_pos: Position,
     pub affected: Vec<Entity>,
+    pub object_hits: Vec<(Entity, f32)>,
 }
+
+#[derive(bevy_ecs::prelude::Resource, Default)]
+pub struct PlayerPositions(pub std::collections::HashMap<u8, (f32, f32)>);

@@ -1,3 +1,5 @@
+import { uboSyncFunctionsSTD40 } from "pixi.js"
+
 export default function utils() {
   this.findPlayerByID = (id) => {
     return this.game.players.find(player => player.id === id)
@@ -8,4 +10,10 @@ export default function utils() {
   }
 
   return this
+}
+
+export function format(number) {
+  if (number >= 1_000_000) return (number / 1_000_000).toFixed(1) + "m";
+  if (number >= 1_000) return (number / 1_000).toFixed(1) + "k";
+  return String(number);
 }

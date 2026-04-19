@@ -5,7 +5,7 @@ use nanorand::Rng;
 
 use crate::{
     structs::components::{AimDir, Health, ObjectBundle, ObjectEntity, Position, Resources},
-    systems::{Collider, GlobalRng},
+    systems::{Collider, GlobalRng, NonReactiveCollider},
     CONFIG,
 };
 
@@ -17,7 +17,9 @@ pub fn init_map(world: &mut World, mut rng: &mut GlobalRng) {
         let x = rng.0.generate::<f32>() * CONFIG.map.size as f32;
         let y = rng.0.generate::<f32>() * CONFIG.map.size as f32;
 
-        if (x > CONFIG.map.ocean_start_x as f32 || (y > CONFIG.map.lava_start as f32 || y < CONFIG.map.snow_start as f32)) {
+        if (x > CONFIG.map.ocean_start_x as f32
+            || (y > CONFIG.map.lava_start as f32 || y < CONFIG.map.snow_start as f32))
+        {
             i -= 1;
             continue;
         }
@@ -36,4 +38,32 @@ pub fn init_map(world: &mut World, mut rng: &mut GlobalRng) {
         );
         world.spawn(bundle);
     }
+
+    init_wall_boundaries(world);
+}
+
+fn init_wall_boundaries(world: &mut World) {
+    world.spawn((
+        Position(8192., 0.),
+        Collider::rect(8192., 67.),
+        NonReactiveCollider,
+    ));
+
+    world.spawn((
+        Position(8192., 16384.),
+        Collider::rect(8192., 67.),
+        NonReactiveCollider,
+    ));
+
+    world.spawn((
+        Position(0., 8192.),
+        Collider::rect(67., 8192.),
+        NonReactiveCollider,
+    ));
+
+    world.spawn((
+        Position(16384., 8192.),
+        Collider::rect(67., 8192.),
+        NonReactiveCollider,
+    ));
 }

@@ -104,4 +104,25 @@ pub struct UpdateHealthData {
     pub new_health: f32,
 }
 
+#[derive(Debug, Clone, BorshDeserialize, BorshSerialize)]
+#[cfg_attr(feature = "web", derive(Serialize, Deserialize))]
+pub struct ObjectHitAnimData {
+    pub id: u32,
+    pub dir: f32,
+}
+
+#[derive(Debug, Clone, BorshDeserialize, BorshSerialize)]
+#[cfg_attr(feature = "web", derive(Serialize, Deserialize))]
+pub struct SetResourceData {
+    pub wood: u32,
+    pub stone: u32,
+    pub food: u32,
+}
+
+#[derive(Debug, Clone, BorshDeserialize, BorshSerialize)]
+#[cfg_attr(feature = "web", derive(Serialize, Deserialize))]
+pub struct SetWeaponsData {
+    pub weapons: Vec<u8>,
+}
+
 // send animials packets to client and render to make sure fishes and animal systems work

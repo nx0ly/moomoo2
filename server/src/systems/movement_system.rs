@@ -1,6 +1,10 @@
 use bevy_ecs::prelude::*;
+use tracing_subscriber::reload;
 
-use crate::structs::components::{MoveDir, PlayerEntity, Position, Velocity};
+use crate::{
+    structs::components::{AttackState, MoveDir, PlayerEntity, Position, ReloadState, Velocity},
+    CONFIG,
+};
 use shared::structs::server::Player;
 
 const PLAYER_MAX_SPEED: f32 = 45.0;
@@ -10,15 +14,32 @@ const SNOW_FRICTION: f32 = 6.7;
 const DT: f32 = 0.45;
 
 pub fn movement_system(
-    mut query: Query<(&mut Position, &mut Velocity, &MoveDir), With<PlayerEntity>>,
+    mut query: Query<
+        (
+            &mut Position,
+            &mut Velocity,
+            &MoveDir,
+            &ReloadState,
+            &AttackState,
+        ),
+        With<PlayerEntity>,
+    >,
 ) {
     let dt = DT;
 
     query
         .par_iter_mut()
-        .for_each(|(mut pos, mut vel, move_dir)| {
+        .for_each(|(mut pos, mut vel, move_dir, reload_state, attack_state)| {
             let mut vx = vel.0;
             let mut vy = vel.1;
+
+            let mut decel = 1_f32;
+            if reload_state.0 <= 0 && attack_state.0 {
+                decel *= 0.2;
+            }
+            if pos.0 > CONFIG.map.ocean_start_x as f32 {
+                decel *= 0.6;
+            }
 
             if let Some(dir) = move_dir.0 {
                 let target_vx = dir.cos() * PLAYER_MAX_SPEED;
@@ -37,6 +58,9 @@ pub fn movement_system(
                     vx = target_vx;
                     vy = target_vy;
                 }
+
+                vx *= decel;
+                vy *= decel;
             } else {
                 // friction when no input
                 let speed = (vx * vx + vy * vy).sqrt();

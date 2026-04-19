@@ -4,6 +4,9 @@ import utils from "./utils";
 import Player from "./objects/player";
 import { decodePacket, initDecoder } from "./packetHandler";
 import { ActionBar } from "./ui/actionBar";
+import { WEAPONS } from "./data/weapons";
+import { ResourceDisplay } from "./ui/resourceDisplay";
+import { HitLeaf } from "./objects/leaf";
 
 export class Game {
   constructor() {
@@ -12,6 +15,11 @@ export class Game {
     this.players = [];
     this.animals = [];
     this.objects = [];
+    this.inventory = [];
+    this.leaves = [];
+
+    this.actionBar = null;
+    this.resourcedisplay = new ResourceDisplay();
 
     this.my_player = null;
 
@@ -83,8 +91,8 @@ export class Game {
     console.log(`send nonce: ${this.crypto.get_send_nonce()}`);
     console.log(`receive nonce: ${this.crypto.get_recv_nonce()}`);
 
-    this.streamWriter.close().catch(() => {});
-    this.streamReader.cancel().catch(() => {});
+    this.streamWriter.close().catch(() => { });
+    this.streamReader.cancel().catch(() => { });
 
     window.addEventListener("keydown", this.handleKey);
     window.addEventListener("keyup", this.handleKey);
@@ -104,38 +112,57 @@ export class Game {
     const reader = this.wt.incomingUnidirectionalStreams.getReader();
     while (true) {
       const { value: stream, done } = await reader.read();
-      console.log("ok", stream);
       if (done) break;
-
-      const chunks = [];
-      const streamReader = stream.getReader();
-      while (true) {
-        const { value: chunk, done: streamDone } = await streamReader.read();
-        if (streamDone) break;
-        chunks.push(chunk);
-      }
-
-      const totalLen = chunks.reduce((n, c) => n + c.length, 0);
-      const buf = new Uint8Array(totalLen);
-      let offset = 0;
-      for (const chunk of chunks) {
-        buf.set(chunk, offset);
-        offset += chunk.length;
-      }
-
-      if (buf.length < 4) continue;
-      const payload = buf.slice(4); // rest is: [nonce:8 | ciphertext]
-
-      try {
-        const plaintext = this.crypto.decrypt(payload);
-        const packet = decodePacket(plaintext);
-        this.handlePacket(packet);
-      } catch (e) {
-        console.error("reliable decrypt/decode error:", e);
-      }
+      this._handleReliableStream(stream).catch(e =>
+        console.error("reliable stream error:", e)
+      );
     }
   }
 
+  async _handleReliableStream(stream) {
+    const reader = stream.getReader();
+    let carry = new Uint8Array(0);
+
+    const readExact = async (n) => {
+      const out = new Uint8Array(n);
+      let offset = 0;
+
+      // drain carry first
+      if (carry.length > 0) {
+        const take = Math.min(carry.length, n);
+        out.set(carry.subarray(0, take), 0);
+        carry = carry.subarray(take);
+        offset += take;
+      }
+
+      while (offset < n) {
+        const { value, done } = await reader.read();
+        if (done) throw new Error("stream closed early");
+        const need = n - offset;
+        if (value.length <= need) {
+          out.set(value, offset);
+          offset += value.length;
+        } else {
+          out.set(value.subarray(0, need), offset);
+          carry = value.subarray(need); // save the overshoot
+          offset = n;
+        }
+      }
+      return out;
+    };
+
+    const lenBuf = await readExact(4);
+    const payloadLen = new DataView(lenBuf.buffer).getUint32(0, false);
+    const payload = await readExact(payloadLen);
+
+    try {
+      const plaintext = this.crypto.decrypt(payload);
+      const packet = decodePacket(plaintext);
+      this.handlePacket(packet);
+    } catch (e) {
+      console.error("reliable decrypt/decode error:", e);
+    }
+  }
   handleKey = (e) => {
     const down = e.type === "keydown";
     if (e.key === "w" || e.key === "ArrowUp") this.moveInput.up = down;
@@ -157,7 +184,7 @@ export class Game {
     this.lastAimDir = aim;
     // aim is sent piggy-backed on every position update from the server (case 3),
     // but also send immediately for responsiveness.
-    this.sendAim(aim).catch(() => {});
+    this.sendAim(aim).catch(() => { });
   };
 
   handleWheel = (e) => {
@@ -186,7 +213,7 @@ export class Game {
 
     if (this.lastMoveDir === dir) return;
     this.lastMoveDir = dir;
-    this.sendMove(dir).catch(() => {});
+    this.sendMove(dir).catch(() => { });
   };
 
   async enterGame() {
@@ -241,7 +268,7 @@ export class Game {
         this.players.push(player);
         if (is_mine) {
           this.my_player = player;
-          window.actionBar = new ActionBar();
+          this.actionBar = new ActionBar();
         }
         break;
       }
@@ -260,18 +287,35 @@ export class Game {
           player.sprite.y = p.y;
         }
 
-        this.sendAim(this.lastAimDir).catch(() => {});
+        this.sendAim(this.lastAimDir).catch(() => { });
         break;
       }
 
-      case 4:
-        this.animals = packet.data.animals.map((a) => ({
-          sid: a.id,
-          x: a.x,
-          y: a.y,
-          type: a.animal_type,
-        }));
+      // case 4:
+      //   console.log(packet.data)
+      //   this.animals = packet.data.animals.map((a) => ({
+      //     sid: a.id,
+      //     x: a.x,
+      //     y: a.y,
+      //     type: a.animal_type,
+      //   }));
+      // break;
+      case 4: {
+        const incoming = packet.data.animals;
+        while (this.animals.length < incoming.length) {
+          this.animals.push({ sid: 0, x: 0, y: 0, type: 0 });
+        }
+        this.animalsLength = incoming.length;
+        for (let i = 0; i < incoming.length; i++) {
+          const a = incoming[i];
+          const slot = this.animals[i];
+          slot.sid = a.id;
+          slot.x = a.x;
+          slot.y = a.y;
+          slot.type = a.animal_type;
+        }
         break;
+      }
 
       case 6: {
         console.log("hit event, entity:", packet.data.entity_id);
@@ -287,6 +331,28 @@ export class Game {
         console.log("objects:", packet);
         this.objects = packet.data.objects;
         break;
+
+      case 9:
+        this.inventory = packet.data.weapons.map(x => WEAPONS.find(y => y.id == x) || {});
+        console.log(this.inventory);
+        if (this.actionBar) this.actionBar.update(this.inventory)
+
+        break;
+
+        case 10: {
+          const object = this.utils.findObjectByID(packet.data.id);
+          console.log(this.renderer.world)
+          this.renderer.leaves.push(new HitLeaf(object.x + (object.scale * Math.cos(packet.data.dir)), object.y + (object.scale * Math.sin(packet.data.dir)), packet.data.dir, this.renderer.leafTexture, this.renderer.world));
+        }
+
+      case 11: {
+        const { wood, stone, food } = packet.data;
+        console.log(packet.data)
+        window.resourceDisplay?.updateResource(0, wood);
+        window.resourceDisplay?.updateResource(1, stone);
+        window.resourceDisplay?.updateResource(2, food);
+        break;
+      }
 
       default:
         console.warn("unknown packet type:", packet.code);

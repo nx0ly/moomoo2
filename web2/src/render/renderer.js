@@ -13,6 +13,7 @@ import FishPNG from "../assets/fish_1.png";
 import Arm1 from "../assets/arm_1.png";
 import Arm2 from "../assets/arm_2.png";
 import Tree from "../assets/tree.png";
+import LeafParticle from "../assets/particle_0.png";
 
 export class Render {
   constructor(game) {
@@ -35,6 +36,8 @@ export class Render {
     this.world.addChild(this.worldBounds);
     this.world.addChild(this.grid);
 
+    this.leaves = [];
+
     this.player_id_to_sprite = {};
     this.animal_id_to_sprite = {};
     this.object_id_to_sprite = {};
@@ -42,6 +45,7 @@ export class Render {
     this.textures = {};
     this.animals = [];
     this.objectTextures = {};
+    this.leafTexture;
 
     this.drawGrid(this.grid, 16384, 16384, 64);
   }
@@ -81,6 +85,8 @@ export class Render {
       data: { family: "GameFont" },
     });
     this.objectTextures.tree = await Assets.load(Tree);
+
+    this.leafTexture = await Assets.load(LeafParticle);
 
     this.textures.player_texture = playerAsset;
     this.textures.fish_texture = fishAsset;
@@ -167,5 +173,9 @@ export class Render {
       sprite.x = object.x;
       sprite.y = object.y;
     }
-  };
+
+    this.leaves.forEach(leaf => {
+      leaf.update(delta);
+    })
+  }
 }

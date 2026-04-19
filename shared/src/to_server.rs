@@ -1,7 +1,7 @@
 use borsh_derive::{BorshDeserialize, BorshSerialize};
 use serde::{Deserialize, Serialize};
 
-use crate::to_client::{AddObjectData, AddPlayerData};
+use crate::to_client::{AddObjectData, AddPlayerData, SetWeaponsData};
 
 #[derive(Debug, Clone, BorshDeserialize, BorshSerialize)]
 #[cfg_attr(feature = "web", derive(Serialize, Deserialize))]
@@ -41,4 +41,5 @@ pub enum ClientMessages {
     ChatMessage,
     HitMessage,
     AddObject(AddObjectData),
+    SetWeapons(SetWeaponsData),
 }

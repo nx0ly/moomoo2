@@ -2,7 +2,8 @@ use serde::Serialize;
 use shared::structs::client::{JsAim, JsHitEvent};
 use shared::structs::server::HitEvent;
 use shared::to_client::{
-    AddAnimalData, AddObjectData, AddPlayerData, HitEventTO, UpdateHealthData, UpdatePlayerData,
+    AddAnimalData, AddObjectData, AddPlayerData, HitEventTO, ObjectHitAnimData, SetResourceData,
+    SetWeaponsData, UpdateHealthData, UpdatePlayerData,
 };
 use shared::to_server::{AimMessage, ClientMessages, HitMessage, MoveMessage};
 use shared::{
@@ -238,6 +239,16 @@ pub fn get_buffer_ptr() -> *mut u8 {
 pub fn get_buffer_size() -> usize {
     BUFFER_SIZE
 }
+
+macro_rules! decode_packet {
+    ($code:expr, $bytes:expr, $T:ty) => {{
+        let data = borsh::from_slice::<$T>($bytes)
+            .map_err(|e| JsValue::from_str(&format!("error decoding {}: {}", stringify!($T), e)))?;
+        let packet = DecodedPacket { code: $code, data };
+        Ok(serde_wasm_bindgen::to_value(&packet).map_err(|e| JsValue::from_str(&e.to_string()))?)
+    }};
+}
+
 #[wasm_bindgen]
 pub fn decode_bytes() -> Result<JsValue, JsValue> {
     let bytes = unsafe {
@@ -273,43 +284,6 @@ fn decode_bytes_inner(bytes: &[u8]) -> Result<JsValue, JsValue> {
                 Ok(serde_wasm_bindgen::to_value(&packet)
                     .map_err(|e| JsValue::from_str(&e.to_string()))?)
             }
-            Some(PacketType::Move) => {
-                let data = borsh::from_slice::<Move>(&bytes[1..])
-                    .map_err(|e| JsValue::from_str(&format!("error decoding move {}", e)))?;
-                let packet = DecodedPacket { code: *code, data };
-                Ok(serde_wasm_bindgen::to_value(&packet)
-                    .map_err(|e| JsValue::from_str(&e.to_string()))?)
-            }
-            Some(PacketType::Aim) => {
-                let data = borsh::from_slice::<Aim>(&bytes[1..])
-                    .map_err(|e| JsValue::from_str(&format!("error decoding move {}", e)))?;
-                let packet = DecodedPacket { code: *code, data };
-                Ok(serde_wasm_bindgen::to_value(&packet)
-                    .map_err(|e| JsValue::from_str(&e.to_string()))?)
-            }
-            Some(PacketType::HitEvent) => {
-                let data = borsh::from_slice::<HitEventTO>(&bytes[1..])
-                    .map_err(|e| JsValue::from_str(&format!("error decoding move {}", e)))?;
-                let packet = DecodedPacket { code: *code, data };
-                Ok(serde_wasm_bindgen::to_value(&packet)
-                    .map_err(|e| JsValue::from_str(&e.to_string()))?)
-            }
-            Some(PacketType::UpdateHealth) => {
-                let data = borsh::from_slice::<UpdateHealthData>(&bytes[1..])
-                    .map_err(|e| JsValue::from_str(&format!("error decoding move {}", e)))?;
-                let packet = DecodedPacket { code: *code, data };
-                Ok(serde_wasm_bindgen::to_value(&packet)
-                    .map_err(|e| JsValue::from_str(&e.to_string()))?)
-            }
-            Some(PacketType::UpdatePlayers) => {
-                let data = borsh::from_slice::<UpdatePlayerData>(&bytes[1..]).map_err(|e| {
-                    JsValue::from_str(&format!("error decoding updateplayers {}", e))
-                })?;
-                let packet = DecodedPacket { code: *code, data };
-
-                Ok(serde_wasm_bindgen::to_value(&packet)
-                    .map_err(|e| JsValue::from_str(&e.to_string()))?)
-            }
             Some(PacketType::AddObject) => {
                 let data = borsh::from_slice::<ClientMessages>(&bytes[1..])
                     .map_err(|e| JsValue::from_str(&format!("error decoding addobject {}", e)))?;
@@ -326,14 +300,17 @@ fn decode_bytes_inner(bytes: &[u8]) -> Result<JsValue, JsValue> {
                 Ok(serde_wasm_bindgen::to_value(&packet)
                     .map_err(|e| JsValue::from_str(&e.to_string()))?)
             }
-            Some(PacketType::AddAnimal) => {
-                let data = borsh::from_slice::<AddAnimalData>(&bytes[1..])
-                    .map_err(|e| JsValue::from_str(&format!("error decoding addanimal {}", e)))?;
-                let packet = DecodedPacket { code: *code, data };
-
-                Ok(serde_wasm_bindgen::to_value(&packet)
-                    .map_err(|e| JsValue::from_str(&e.to_string()))?)
+            Some(PacketType::Move) => decode_packet!(*code, &bytes[1..], Move),
+            Some(PacketType::Aim) => decode_packet!(*code, &bytes[1..], Aim),
+            Some(PacketType::HitEvent) => decode_packet!(*code, &bytes[1..], HitEventTO),
+            Some(PacketType::UpdateHealth) => decode_packet!(*code, &bytes[1..], UpdateHealthData),
+            Some(PacketType::UpdatePlayers) => decode_packet!(*code, &bytes[1..], UpdatePlayerData),
+            Some(PacketType::AddAnimal) => decode_packet!(*code, &bytes[1..], AddAnimalData),
+            Some(PacketType::SetWeapons) => decode_packet!(*code, &bytes[1..], SetWeaponsData),
+            Some(PacketType::ObjectHitAnim) => {
+                decode_packet!(*code, &bytes[1..], ObjectHitAnimData)
             }
+            Some(PacketType::SetResource) => decode_packet!(*code, &bytes[1..], SetResourceData),
             None => Err(JsValue::from_str("unknown opcode")),
         },
         None => Err(JsValue::from_str("no opcode found")),

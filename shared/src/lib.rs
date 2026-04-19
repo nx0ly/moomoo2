@@ -5,7 +5,7 @@ pub mod to_server;
 
 use crate::{
     structs::server::{Aim, HitEvent, Move, Player},
-    to_client::{AddAnimalData, AddObjectData, HitEventTO, UpdateHealthData, UpdatePlayerData},
+    to_client::{AddAnimalData, AddObjectData, SetResourceData, UpdateHealthData, UpdatePlayerData, ObjectHitAnimData},
 };
 use borsh_derive::BorshSerialize;
 #[cfg(feature = "web")]
@@ -21,7 +21,9 @@ pub enum Packet {
     Aim(Aim),
     HitEvent(HitEvent),
     AddObject(AddObjectData),
-    UpdateHealth(UpdateHealthData)
+    UpdateHealth(UpdateHealthData),
+    ObjectHitAnim(ObjectHitAnimData),
+    SetResource(SetResourceData),
 }
 
 #[repr(u8)]
@@ -36,6 +38,9 @@ pub enum PacketType {
     HitEvent = 6,
     AddObject = 7,
     UpdateHealth = 8,
+    SetWeapons = 9,
+    ObjectHitAnim = 10,
+    SetResource = 11,
 }
 impl PacketType {
     pub fn from_u8(val: u8) -> Option<PacketType> {
@@ -48,6 +53,9 @@ impl PacketType {
             6 => Some(Self::HitEvent),
             7 => Some(Self::AddObject),
             8 => Some(Self::UpdateHealth),
+            9 => Some(Self::SetWeapons),
+            10 => Some(Self::ObjectHitAnim),
+            11 => Some(Self::SetResource),
             _ => None,
         }
     }
