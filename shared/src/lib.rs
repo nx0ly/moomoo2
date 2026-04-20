@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(BorshSerialize)]
 #[cfg_attr(feature = "web", derive(Serialize, Deserialize))]
+/// Packets.
 pub enum Packet {
     Spawn(Player),
     Move(Move),
@@ -29,6 +30,8 @@ pub enum Packet {
 #[repr(u8)]
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "web", derive(Serialize, Deserialize))]
+/// Contains every possible packet.
+/// All packets have unique opcodes, regardless of target.
 pub enum PacketType {
     Spawn = 1,
     Move = 2,
@@ -42,6 +45,7 @@ pub enum PacketType {
     ObjectHitAnim = 10,
     SetResource = 11,
 }
+
 impl PacketType {
     pub fn from_u8(val: u8) -> Option<PacketType> {
         match val {

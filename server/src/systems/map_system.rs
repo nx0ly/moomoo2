@@ -1,6 +1,6 @@
 use std::f32;
 
-use bevy_ecs::{system::ResMut, world::World};
+use bevy_ecs::world::World;
 use nanorand::Rng;
 
 use crate::{
@@ -11,16 +11,15 @@ use crate::{
 
 // REMOVE ANY OVERLAPS
 // LATER: make speciic objects in speciic biomes
-pub fn init_map(world: &mut World, mut rng: &mut GlobalRng) {
+pub fn init_map(world: &mut World, rng: &mut GlobalRng) {
     // spawn trees
-    for mut i in 0..677 {
+    for _ in 0..677 {
         let x = rng.0.generate::<f32>() * CONFIG.map.size as f32;
         let y = rng.0.generate::<f32>() * CONFIG.map.size as f32;
 
-        if (x > CONFIG.map.ocean_start_x as f32
-            || (y > CONFIG.map.lava_start as f32 || y < CONFIG.map.snow_start as f32))
+        if x > CONFIG.map.ocean_start_x as f32
+            || (y > CONFIG.map.lava_start as f32 || y < CONFIG.map.snow_start as f32)
         {
-            i -= 1;
             continue;
         }
 

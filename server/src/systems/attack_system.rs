@@ -46,10 +46,9 @@ pub fn attack_system(
 
             for (target_id, target_pos, target_collider, game_obj) in object_targets.iter() {
                 let dist = get_distance(pos, target_pos);
-                if dist < collider.rad + target_collider.rad + get_weapon_range(weapon)
-                    && get_angle(target_pos, pos) < 2.0
-                {
+                if dist < collider.rad + target_collider.rad + get_weapon_range(weapon) {
                     let angle = (pos.1 - target_pos.1).atan2(pos.0 - target_pos.0);
+
                     if angle_diff(aim.0, angle).abs() < f32::consts::PI / 2.0 {
                         object_hits.push((target_id, angle));
 
@@ -79,10 +78,6 @@ fn get_distance(a: &Position, b: &Position) -> f32 {
     let dx = a.0 - b.0;
     let dy = a.1 - b.1;
     ((dx * dx) + (dy * dy)).sqrt()
-}
-
-fn get_angle(a: &Position, b: &Position) -> f32 {
-    (b.1 - a.1).atan2(b.0 - a.0)
 }
 
 fn angle_diff(a: f32, b: f32) -> f32 {

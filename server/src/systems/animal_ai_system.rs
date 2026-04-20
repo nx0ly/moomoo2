@@ -54,6 +54,7 @@ pub fn animal_ai_system(
         }
     }
 
+    let mut nearby = Vec::with_capacity(64);
     for (mut vel, mut pos, state, mut target, animal_type) in query.iter_mut() {
         match *state {
             AiState::Idle => {
@@ -94,7 +95,8 @@ pub fn animal_ai_system(
                         VISUAL_RANGE * 2.0,
                         VISUAL_RANGE * 2.0,
                     );
-                    let mut nearby = Vec::with_capacity(32);
+
+                    nearby.clear();
                     qtree.query(&search, &mut nearby);
 
                     for point in &nearby {

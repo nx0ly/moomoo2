@@ -8,6 +8,5 @@ mod movement_system;
 pub use animal_ai_system::*;
 pub use attack_system::*;
 pub use collision_system::*;
-pub use damage_system::*;
 pub use map_system::*;
 pub use movement_system::movement_system;

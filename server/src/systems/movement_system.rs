@@ -66,7 +66,7 @@ pub fn movement_system(
                 let speed = (vx * vx + vy * vy).sqrt();
                 let mut drop = 0_f32;
 
-                if pos.0 < 4096. {
+                if pos.1 < 4096. {
                     drop = SNOW_FRICTION * dt;
                 } else {
                     drop = PLAYER_FRICTION * dt;

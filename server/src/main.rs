@@ -1,6 +1,5 @@
 use std::{
     sync::{atomic::AtomicU8, Arc},
-    time::Duration,
 };
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
@@ -9,37 +8,22 @@ struct CollisionSet;
 use bevy_ecs::{prelude::*, schedule::ScheduleBuildSettings};
 use dashmap::DashMap;
 use parking_lot::Mutex;
-use shared::{
-    structs::server::HitEvent as sharedHitEvent,
-    to_client::{ObjectHitAnimData, ObjectTO, SetResourceData, SetWeaponsData},
-    to_server::{AimMessage, MoveMessage, SpawnMessage},
-};
-use shared::{
-    structs::server::Player,
-    to_client::{AddAnimalData, AnimalTO},
-};
-use shared::{to_client::HitEventTO, PacketType};
-use shared::{
-    to_client::{PlayerTO, UpdatePlayerData},
-    to_server::{ClientMessages, HitMessage},
-};
+
 use tokio::sync::mpsc as god;
 use wtransport::*;
 
-use nanorand::{Rng, WyRand};
+use nanorand::{WyRand};
 
 use crate::{
     config::config::{load_config, Config},
-    errors::{GameError, InternalGameMessages},
+    errors::InternalGameMessages,
     structs::{
-        bevy::{IDToConnection, InputMap, PlayerConnection, PlayerInput, PlayerMap, World},
+        bevy::{IDToConnection, InputMap, PlayerConnection, PlayerMap, World},
         components::{
-            AiState, AiTarget, AimDir, AnimalEntity, AnimalType, AttackState, Health, HitEvents,
-            MoveDir, Name, ObjectEntity, PlayerBundle, PlayerEntity, PlayerPositions, Position,
-            ReloadState, Resources, Velocity,
+            HitEvents, PlayerPositions
         },
     },
-    systems::{init_animals, init_map, GlobalRng, NonReactiveCollider},
+    systems::{init_animals, init_map, GlobalRng},
 };
 
 mod config;
@@ -100,10 +84,15 @@ async fn main() -> anyhow::Result<()> {
 
     drop(w);
 
+    // rayon::ThreadPoolBuilder::new()
+    // .stack_size(16 * 1024 * 1024)
+    // .build_global()
+    // .expect("failed to configure rayon thread pool");
+
     let player_connections: IDToConnection = Arc::new(DashMap::new());
     let input_map: InputMap = Arc::new(DashMap::new());
 
-    let (input_tx, mut input_rx) = god::channel::<(u8, InternalGameMessages)>(1024);
+    let (input_tx, input_rx) = god::channel::<(u8, InternalGameMessages)>(1024);
 
     let identity = Identity::load_pemfiles("cert.pem", "key.pem").await?;
     let server_config = ServerConfig::builder()
