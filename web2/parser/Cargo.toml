@@ -12,7 +12,9 @@ borsh-derive = "1.6.0"
 shared = { path = "../../shared", features = ["web"]}
 wasm-bindgen = { version = "0.2" }
 serde = { version = "1.0", features = ["derive"] }
-serde_derive = "1.0"
+# serde_derive = "1.0"
+#gng why tf do u have serde_derive here
+#reducing deps is part of optimizations rah
 serde-wasm-bindgen = "0.6.5"
 chacha20poly1305 = "0.10.1"
 x25519-dalek = { version = "2.0", features = ["static_secrets"] }

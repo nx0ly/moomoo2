@@ -1,2 +1,9 @@
 [build]
 target = "wasm32-unknown-unknown"
+rustflags = [
+  "-C", "target-feature=+simd128", #simd = god
+  "-C", "target-feature=+bulk-memory", #bulk mem = do big fast
+  "-C", "target-feature=+nontrapping-fptoint", #fast math
+  "-C", "target-feature=+mutable-globals", #less binary code
+  "-C", "link-arg=--gc-sections", #less waste of space
+]
