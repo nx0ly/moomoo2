@@ -1,11 +1,3 @@
-use crate::{
-    structs::{
-        components::{AiState, AiTarget, AnimalEntity, AnimalType, Position, Velocity},
-        quadtree::{Point, Quadtree, Rect},
-    },
-    systems::{Collider, NonReactiveCollider},
-    CONFIG,
-};
 use bevy_ecs::{
     query::With,
     resource::Resource,
@@ -14,9 +6,19 @@ use bevy_ecs::{
 };
 use nanorand::{Rng, WyRand};
 
+use crate::{
+    structs::{
+        components::{AiState, AiTarget, AnimalEntity, AnimalType, Position, Velocity},
+        quadtree::{Point, Quadtree, Rect},
+    },
+    systems::{Collider, NonReactiveCollider},
+    CONFIG,
+};
+
 #[derive(Resource)]
 pub struct GlobalRng(pub WyRand);
 
+// TODO: move to config file.
 const VISUAL_RANGE: f32 = 200.0; // sqrt(40000)
 const VISUAL_RANGE_SQ: f32 = 40000.0;
 const PROTECTED_RANGE_SQ: f32 = 900.0;
@@ -25,21 +27,12 @@ const ALIGNMENT_FACTOR: f32 = 0.08;
 const COHESION_FACTOR: f32 = 0.008;
 const WANDER_STRENGTH: f32 = 0.05;
 
+/// System that handles animal entity movement.
 pub fn animal_ai_system(
     mut rng: ResMut<GlobalRng>,
-    mut query: Query<
-        (
-            &mut Velocity,
-            &mut Position,
-            &mut AiState,
-            &mut AiTarget,
-            &AnimalType,
-        ),
-        With<AnimalEntity>,
-    >,
+    mut query: Query<(&mut Velocity, &mut Position, &mut AiState, &mut AiTarget, &AnimalType), With<AnimalEntity>>,
 ) {
-    let snapshots: Vec<(Velocity, Position, AnimalType)> =
-        query.iter().map(|(v, p, _, _, t)| (*v, *p, *t)).collect();
+    let snapshots: Vec<(Velocity, Position, AnimalType)> = query.iter().map(|(v, p, _, _, t)| (*v, *p, *t)).collect();
 
     // build quadtree once from snapshots
     let boundary = Rect::new(0.0, 0.0, 16384.0, 16384.0);
@@ -47,8 +40,8 @@ pub fn animal_ai_system(
     for (i, (_, pos, animal_type)) in snapshots.iter().enumerate() {
         if matches!(animal_type, AnimalType::Fish) {
             qtree.insert(Point {
-                x: pos.0,
-                y: pos.1,
+                x:     pos.0,
+                y:     pos.1,
                 index: i,
             });
         }

@@ -6,9 +6,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.100"
 config = { version = "0.15.19", features = ["toml"] }
-glam = "0.30.9"
 rapier2d = { version = "0.31.0", features = ["simd-stable"] }
-rcgen = "0.14.6"
 tokio = { version = "1.48.0", features = ["full"] }
 tracing = "0.1.44"
 bytemuck = { version = "1.15", features = ["derive"] }
@@ -24,9 +22,7 @@ bytes = "1.11.0"
 serde = { version = "1.0.228", features = ["derive"] }
 rayon = "1.11.0"
 parking_lot = "0.12.5"
-futures = "0.3.31"
 chacha20poly1305 = "0.10.1"
-rand = "0.8"
 rand_core = "0.6"
 x25519-dalek = { version = "2.0", features = ["static_secrets"] }
 sha2 = "0.10.9"
@@ -34,19 +30,23 @@ pqc_kyber = { version = "0.7.1", features = ["kyber768", "90s"] }
 hkdf = "0.12.4"
 nanorand = { version = "0.7.0", features = ["wyrand"] }
 noise = "0.9.0"
-futures-lite = "2.6.1"
 once_cell = "1.21.3"
 ratatui = { version = "0.29", features = ["unstable-widget-ref"] }
 crossterm = "0.28"
 mimalloc = { version = "0.1.49", features = ["secure"] }
+bumpalo = { version = "3.20.2", features = ["collections"] }
 
 [profile.release]
-#opt-level = 3
-#lto = true
-#codegen-units = 1
-#panic = "abort"
-# debug = true
+# opt-level = 3
+# lto = "thin"
+# codegen-units = 1
+# debug = false
+# overflow-checks = false
+# incremental = false
+# panic = "abort"
+# strip = "debuginfo"
 
-debug = true
-strip = false             # Ensure symbols aren't stripped
-split-debuginfo = "off"   # Keep symbols in the binary for easier profiling
+# to test using flamegraph
+# debug = true
+# strip = false
+# split-debuginfo = "off"

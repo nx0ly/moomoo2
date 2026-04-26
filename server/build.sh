@@ -1,1 +1,2 @@
-RUSTFLAGS="-C target-cpu=native" cargo run
+# RUSTFLAGS="-C target-cpu=native" 
+cargo run --release

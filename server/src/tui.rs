@@ -35,49 +35,49 @@ use crate::{
 
 #[derive(Clone)]
 struct PlayerSnap {
-    id: u8,
-    name: String,
-    x: f32,
-    y: f32,
-    health: f32,
+    id:         u8,
+    name:       String,
+    x:          f32,
+    y:          f32,
+    health:     f32,
     max_health: f32,
-    wood: u32,
-    stone: u32,
-    food: u32,
-    gold: u32,
-    kills: u32,
+    wood:       u32,
+    stone:      u32,
+    food:       u32,
+    gold:       u32,
+    kills:      u32,
     bytes_sent: u64,
     bytes_recv: u64,
 }
 
 #[derive(Clone)]
 struct AnimalSnap {
-    x: f32,
-    y: f32,
+    x:      f32,
+    y:      f32,
     radius: f32,
-    kind: AnimalType,
+    kind:   AnimalType,
 }
 
 #[derive(Clone)]
 struct ObjectSnap {
-    x: f32,
-    y: f32,
+    x:      f32,
+    y:      f32,
     radius: f32,
 }
 
 struct App {
-    tab: usize,
-    player_tbl: TableState,
-    net_tbl: TableState,
-    players: Vec<PlayerSnap>,
-    animals: Vec<AnimalSnap>,
-    objects: Vec<ObjectSnap>,
+    tab:          usize,
+    player_tbl:   TableState,
+    net_tbl:      TableState,
+    players:      Vec<PlayerSnap>,
+    animals:      Vec<AnimalSnap>,
+    objects:      Vec<ObjectSnap>,
     show_players: bool,
     show_animals: bool,
     show_objects: bool,
-    map_size: f32,
-    start: Instant,
-    status_msg: Option<(String, Instant)>,
+    map_size:     f32,
+    start:        Instant,
+    status_msg:   Option<(String, Instant)>,
 }
 
 impl App {
@@ -116,14 +116,8 @@ impl App {
     }
 
     fn selected_id(&self) -> Option<u8> {
-        let tbl = if self.tab == 2 {
-            &self.net_tbl
-        } else {
-            &self.player_tbl
-        };
-        tbl.selected()
-            .and_then(|i| self.players.get(i))
-            .map(|p| p.id)
+        let tbl = if self.tab == 2 { &self.net_tbl } else { &self.player_tbl };
+        tbl.selected().and_then(|i| self.players.get(i)).map(|p| p.id)
     }
 
     fn move_sel(&mut self, delta: i32) {
@@ -152,11 +146,7 @@ impl App {
     }
 }
 
-pub fn init_tui(
-    world: Arc<Mutex<GameWorld>>,
-    connections: IDToConnection,
-    game_tx: GameChannel,
-) -> anyhow::Result<()> {
+pub fn init_tui(world: Arc<Mutex<GameWorld>>, connections: IDToConnection, game_tx: GameChannel) -> anyhow::Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     stdout.execute(EnterAlternateScreen)?;
@@ -198,8 +188,7 @@ pub fn init_tui(
                                     .find(|p| p.id == id)
                                     .map(|p| p.name.clone())
                                     .unwrap_or_default();
-                                let _ =
-                                    game_tx.try_send((id, InternalGameMessages::Disconnect));
+                                let _ = game_tx.try_send((id, InternalGameMessages::Disconnect));
                                 connections.remove(&id);
                                 app.set_status(format!("Disconnected {} (id {})", name, id));
                             }
@@ -282,13 +271,13 @@ fn refresh(world: &Arc<Mutex<GameWorld>>, connections: &IDToConnection, app: &mu
             .iter(&w.bevy_world)
             .take(2048)
             .map(|(pos, kind)| AnimalSnap {
-                x: pos.0,
-                y: pos.1,
+                x:      pos.0,
+                y:      pos.1,
                 radius: match kind {
                     AnimalType::Wolf => 25.0,
                     AnimalType::Fish => 10.0,
                 },
-                kind: *kind,
+                kind:   *kind,
             })
             .collect();
     }
@@ -298,8 +287,8 @@ fn refresh(world: &Arc<Mutex<GameWorld>>, connections: &IDToConnection, app: &mu
         app.objects = q
             .iter(&w.bevy_world)
             .map(|(pos, col, _)| ObjectSnap {
-                x: pos.0,
-                y: pos.1,
+                x:      pos.0,
+                y:      pos.1,
                 radius: col.rad,
             })
             .collect();
@@ -316,11 +305,7 @@ fn render(f: &mut Frame, app: &mut App) {
 
     let root = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3),
-            Constraint::Min(0),
-            Constraint::Length(3),
-        ])
+        .constraints([Constraint::Length(3), Constraint::Min(0), Constraint::Length(3)])
         .split(area);
 
     render_header(f, app, root[0]);
@@ -346,9 +331,7 @@ fn render_header(f: &mut Frame, app: &mut App, area: Rect) {
             "Admin Panel  Players: {}  Uptime: {}  Animals: {}  Objects: {} ",
             player_count, uptime, animal_count, object_count,
         ),
-        Style::default()
-            .fg(Color::White)
-            .add_modifier(Modifier::BOLD),
+        Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
     );
 
     let tabs = Tabs::new(["  1: Players  ", "  2: Minimap  ", "  3: Network  "])
@@ -400,27 +383,15 @@ fn render_players(f: &mut Frame, app: &mut App, area: Rect) {
             let hp_color = health_color(hp_pct);
 
             Row::new(vec![
-                Cell::from(format!("{:03}", p.id))
-                    .style(Style::default().fg(Color::Rgb(100, 100, 140))),
-                Cell::from(p.name.clone()).style(
-                    Style::default()
-                        .fg(Color::White)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Cell::from(format!("({:.0}, {:.0})", p.x, p.y))
-                    .style(Style::default().fg(Color::Rgb(120, 120, 160))),
-                Cell::from(format!("{:.0}/{:.0}", p.health, p.max_health))
-                    .style(Style::default().fg(hp_color)),
-                Cell::from(p.kills.to_string())
-                    .style(Style::default().fg(Color::Rgb(220, 80, 80))),
-                Cell::from(p.wood.to_string())
-                    .style(Style::default().fg(Color::Rgb(160, 100, 40))),
-                Cell::from(p.stone.to_string())
-                    .style(Style::default().fg(Color::Rgb(160, 160, 160))),
-                Cell::from(p.food.to_string())
-                    .style(Style::default().fg(Color::Rgb(80, 180, 80))),
-                Cell::from(p.gold.to_string())
-                    .style(Style::default().fg(Color::Rgb(220, 180, 40))),
+                Cell::from(format!("{:03}", p.id)).style(Style::default().fg(Color::Rgb(100, 100, 140))),
+                Cell::from(p.name.clone()).style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                Cell::from(format!("({:.0}, {:.0})", p.x, p.y)).style(Style::default().fg(Color::Rgb(120, 120, 160))),
+                Cell::from(format!("{:.0}/{:.0}", p.health, p.max_health)).style(Style::default().fg(hp_color)),
+                Cell::from(p.kills.to_string()).style(Style::default().fg(Color::Rgb(220, 80, 80))),
+                Cell::from(p.wood.to_string()).style(Style::default().fg(Color::Rgb(160, 100, 40))),
+                Cell::from(p.stone.to_string()).style(Style::default().fg(Color::Rgb(160, 160, 160))),
+                Cell::from(p.food.to_string()).style(Style::default().fg(Color::Rgb(80, 180, 80))),
+                Cell::from(p.gold.to_string()).style(Style::default().fg(Color::Rgb(220, 180, 40))),
             ])
         })
         .collect();
@@ -446,17 +417,11 @@ fn render_players(f: &mut Frame, app: &mut App, area: Rect) {
                 .border_style(Style::default().fg(Color::Rgb(40, 80, 140)))
                 .title(Span::styled(
                     " Players ",
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
+                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
                 ))
                 .style(Style::default().bg(Color::Rgb(10, 12, 20))),
         )
-        .row_highlight_style(
-            Style::default()
-                .bg(Color::Rgb(25, 40, 70))
-                .add_modifier(Modifier::BOLD),
-        )
+        .row_highlight_style(Style::default().bg(Color::Rgb(25, 40, 70)).add_modifier(Modifier::BOLD))
         .highlight_symbol("▶ ");
 
     f.render_stateful_widget(table, chunks[0], &mut app.player_tbl);
@@ -467,9 +432,7 @@ fn render_players(f: &mut Frame, app: &mut App, area: Rect) {
         .border_style(Style::default().fg(Color::Rgb(40, 80, 140)))
         .title(Span::styled(
             " Selected Player ",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
         ))
         .style(Style::default().bg(Color::Rgb(10, 12, 20)));
 
@@ -484,11 +447,7 @@ fn render_players(f: &mut Frame, app: &mut App, area: Rect) {
 
         let gauge = Gauge::default()
             .block(detail_block)
-            .gauge_style(
-                Style::default()
-                    .fg(hp_color)
-                    .bg(Color::Rgb(30, 20, 20)),
-            )
+            .gauge_style(Style::default().fg(hp_color).bg(Color::Rgb(30, 20, 20)))
             .ratio(hp_pct.clamp(0.0, 1.0))
             .label(format!(
                 "{}  |  HP {:.0}/{:.0}  |  Kills {}  |  [D] Disconnect",
@@ -500,24 +459,14 @@ fn render_players(f: &mut Frame, app: &mut App, area: Rect) {
         let hint = Paragraph::new(Line::from(vec![
             Span::styled(
                 "↑↓ / j k",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 "  to select a player   ",
                 Style::default().fg(Color::Rgb(120, 120, 140)),
             ),
-            Span::styled(
-                "D",
-                Style::default()
-                    .fg(Color::Red)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                "  to disconnect",
-                Style::default().fg(Color::Rgb(120, 120, 140)),
-            ),
+            Span::styled("D", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+            Span::styled("  to disconnect", Style::default().fg(Color::Rgb(120, 120, 140))),
         ]))
         .block(detail_block)
         .alignment(Alignment::Center);
@@ -550,9 +499,7 @@ fn render_minimap(f: &mut Frame, app: &mut App, area: Rect) {
                 .border_style(Style::default().fg(Color::Rgb(40, 80, 140)))
                 .title(Span::styled(
                     " Minimap ",
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
+                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
                 ))
                 .style(Style::default().bg(Color::Rgb(8, 14, 10))),
         )
@@ -562,10 +509,10 @@ fn render_minimap(f: &mut Frame, app: &mut App, area: Rect) {
             if show_o {
                 for obj in &objects {
                     ctx.draw(&Circle {
-                        x: obj.x as f64,
-                        y: to_canvas_y(obj.y),
+                        x:      obj.x as f64,
+                        y:      to_canvas_y(obj.y),
                         radius: (obj.radius as f64).max(60.0),
-                        color: Color::Rgb(120, 80, 30),
+                        color:  Color::Rgb(120, 80, 30),
                     });
                 }
             }
@@ -580,16 +527,16 @@ fn render_minimap(f: &mut Frame, app: &mut App, area: Rect) {
                 if !fish.is_empty() {
                     ctx.draw(&Points {
                         coords: &fish,
-                        color: Color::Rgb(40, 200, 200),
+                        color:  Color::Rgb(40, 200, 200),
                     });
                 }
 
                 for wolf in animals.iter().filter(|a| matches!(a.kind, AnimalType::Wolf)) {
                     ctx.draw(&Circle {
-                        x: wolf.x as f64,
-                        y: to_canvas_y(wolf.y),
+                        x:      wolf.x as f64,
+                        y:      to_canvas_y(wolf.y),
                         radius: 100.0,
-                        color: Color::Rgb(220, 100, 20),
+                        color:  Color::Rgb(220, 100, 20),
                     });
                 }
             }
@@ -597,10 +544,10 @@ fn render_minimap(f: &mut Frame, app: &mut App, area: Rect) {
             if show_p {
                 for p in &players {
                     ctx.draw(&Circle {
-                        x: p.x as f64,
-                        y: to_canvas_y(p.y),
+                        x:      p.x as f64,
+                        y:      to_canvas_y(p.y),
                         radius: 140.0,
-                        color: Color::Rgb(60, 255, 100),
+                        color:  Color::Rgb(60, 255, 100),
                     });
 
                     ctx.print(
@@ -608,9 +555,7 @@ fn render_minimap(f: &mut Frame, app: &mut App, area: Rect) {
                         to_canvas_y(p.y) - 220.0,
                         Span::styled(
                             p.name.clone(),
-                            Style::default()
-                                .fg(Color::White)
-                                .add_modifier(Modifier::BOLD),
+                            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
                         ),
                     );
                 }
@@ -625,9 +570,7 @@ fn render_minimap(f: &mut Frame, app: &mut App, area: Rect) {
     let lines = vec![
         Line::from(Span::styled(
             " Legend",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
         Line::from(vec![
@@ -691,19 +634,11 @@ fn render_network(f: &mut Frame, app: &mut App, area: Rect) {
         .map(|p| {
             let total = p.bytes_sent + p.bytes_recv;
             Row::new(vec![
-                Cell::from(format!("{:03}", p.id))
-                    .style(Style::default().fg(Color::Rgb(100, 100, 140))),
-                Cell::from(p.name.clone()).style(
-                    Style::default()
-                        .fg(Color::White)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Cell::from(fmt_bytes(p.bytes_sent))
-                    .style(Style::default().fg(Color::Rgb(60, 200, 100))),
-                Cell::from(fmt_bytes(p.bytes_recv))
-                    .style(Style::default().fg(Color::Rgb(60, 140, 220))),
-                Cell::from(fmt_bytes(total))
-                    .style(Style::default().fg(Color::Rgb(180, 180, 220))),
+                Cell::from(format!("{:03}", p.id)).style(Style::default().fg(Color::Rgb(100, 100, 140))),
+                Cell::from(p.name.clone()).style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                Cell::from(fmt_bytes(p.bytes_sent)).style(Style::default().fg(Color::Rgb(60, 200, 100))),
+                Cell::from(fmt_bytes(p.bytes_recv)).style(Style::default().fg(Color::Rgb(60, 140, 220))),
+                Cell::from(fmt_bytes(total)).style(Style::default().fg(Color::Rgb(180, 180, 220))),
                 Cell::from("[D] Kick").style(
                     Style::default()
                         .fg(Color::Rgb(200, 60, 60))
@@ -731,17 +666,11 @@ fn render_network(f: &mut Frame, app: &mut App, area: Rect) {
                 .border_style(Style::default().fg(Color::Rgb(40, 80, 140)))
                 .title(Span::styled(
                     " Network Traffic (cumulative) ",
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
+                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
                 ))
                 .style(Style::default().bg(Color::Rgb(10, 12, 20))),
         )
-        .row_highlight_style(
-            Style::default()
-                .bg(Color::Rgb(25, 40, 70))
-                .add_modifier(Modifier::BOLD),
-        )
+        .row_highlight_style(Style::default().bg(Color::Rgb(25, 40, 70)).add_modifier(Modifier::BOLD))
         .highlight_symbol("▶ ");
 
     f.render_stateful_widget(table, chunks[0], &mut app.net_tbl);
@@ -752,9 +681,7 @@ fn render_network(f: &mut Frame, app: &mut App, area: Rect) {
         .border_style(Style::default().fg(Color::Rgb(40, 80, 140)))
         .title(Span::styled(
             " Connection Detail ",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
         ))
         .style(Style::default().bg(Color::Rgb(10, 12, 20)));
 
@@ -770,24 +697,16 @@ fn render_network(f: &mut Frame, app: &mut App, area: Rect) {
         let detail = Paragraph::new(vec![Line::from(vec![
             Span::styled(
                 format!(" {} ", p.name),
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 format!("id:{:03}  ", p.id),
                 Style::default().fg(Color::Rgb(100, 100, 140)),
             ),
             Span::styled("↑ ", Style::default().fg(Color::Rgb(60, 200, 100))),
-            Span::styled(
-                fmt_bytes(p.bytes_sent),
-                Style::default().fg(Color::Rgb(60, 200, 100)),
-            ),
+            Span::styled(fmt_bytes(p.bytes_sent), Style::default().fg(Color::Rgb(60, 200, 100))),
             Span::styled("   ↓ ", Style::default().fg(Color::Rgb(60, 140, 220))),
-            Span::styled(
-                fmt_bytes(p.bytes_recv),
-                Style::default().fg(Color::Rgb(60, 140, 220)),
-            ),
+            Span::styled(fmt_bytes(p.bytes_recv), Style::default().fg(Color::Rgb(60, 140, 220))),
             Span::styled(
                 format!("   total: {}  ", fmt_bytes(total)),
                 Style::default().fg(Color::Rgb(180, 180, 220)),
@@ -837,16 +756,11 @@ fn render_footer(f: &mut Frame, app: &App, area: Rect) {
         let mut spans: Vec<Span> = vec![];
         for (i, (key, desc)) in keys.iter().enumerate() {
             if i > 0 {
-                spans.push(Span::styled(
-                    "  │  ",
-                    Style::default().fg(Color::Rgb(50, 50, 70)),
-                ));
+                spans.push(Span::styled("  │  ", Style::default().fg(Color::Rgb(50, 50, 70))));
             }
             spans.push(Span::styled(
                 format!("[{}]", key),
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
             ));
             spans.push(Span::styled(
                 format!(" {}", desc),

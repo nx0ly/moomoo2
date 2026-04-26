@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 pub struct SpatialHash {
     cell_size: f32,
-    pub grid: HashMap<u64, Vec<usize>>,
+    pub grid:  HashMap<u64, Vec<usize>>,
 }
 
 impl SpatialHash {

@@ -1,24 +1,17 @@
 use shared::{
-    structs::server::{Aim, Move, Player},
+    structs::server::Player,
     to_server::{AimMessage, HitMessage, MoveMessage, SpawnMessage},
     PacketType,
 };
 
-use crate::{
-    errors::InternalGameMessages, net::serialization::decode, structs::bevy::InputMap, GameChannel,
-};
+use crate::{errors::InternalGameMessages, net::serialization::decode, structs::bevy::InputMap, GameChannel};
 
-pub async fn handle_msg(
-    opcode: u8,
-    data: &[u8],
-    player_id: u8,
-    game_tx: &GameChannel,
-    input_map: &InputMap,
-) {
+/// Exported fn that handles incoming messages from clients.
+pub async fn handle_msg(opcode: u8, data: &[u8], player_id: u8, game_tx: &GameChannel, input_map: &InputMap) {
+    // Handle the packet based on it's opcode.
     match PacketType::from_u8(opcode) {
         Some(PacketType::Spawn) => {
             if let Ok(data) = decode::<SpawnMessage>(data) {
-                // let mut rng = WyRand::new(); //ok
                 let _ = game_tx
                     .send((
                         player_id,
@@ -42,7 +35,7 @@ pub async fn handle_msg(
             }
         }
         Some(PacketType::HitEvent) => {
-            if let Ok(data) = decode::<HitMessage>(data) {
+            if let Ok(_) = decode::<HitMessage>(data) {
                 let _ = game_tx.try_send((
                     player_id,
                     InternalGameMessages::PlayerHit(shared::structs::server::HitEvent {}),

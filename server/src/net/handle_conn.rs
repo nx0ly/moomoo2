@@ -6,6 +6,7 @@ use crate::{
     ConnectionMap, GameChannel,
 };
 
+/// Exported fn that handles wtransport connection requests.
 pub async fn handle_conn(
     connection: wtransport::Connection,
     player_id: u8,
@@ -17,15 +18,13 @@ pub async fn handle_conn(
     let (mut send_stream, mut recv_stream) = match connection.accept_bi().await {
         Ok(s) => s,
         Err(e) => {
-            tracing::error!(
-                "Failed to open bidirectional stream for the handshake: {}",
-                e
-            );
+            tracing::error!("Failed to open bidirectional stream for the handshake: {}", e);
             return;
         }
     };
 
-    // Perform the handshake. Stores a `SessionCrypto` used to decrypt incoming messages and encrypt.
+    // Perform the handshake. Stores a `SessionCrypto` used to decrypt incoming
+    // messages and encrypt.
     let crypto = match perform_handshake(&mut send_stream, &mut recv_stream).await {
         Ok(c) => c,
         Err(e) => {
@@ -40,10 +39,7 @@ pub async fn handle_conn(
     drop(recv_stream);
 
     // Store the new player entry.
-    connection_map.insert(
-        player_id,
-        PlayerConnection::new(connection.clone(), crypto.clone()),
-    );
+    connection_map.insert(player_id, PlayerConnection::new(connection.clone(), crypto.clone()));
     tracing::info!("player {} connected - session encrypted", player_id);
 
     // Message read loop.
@@ -57,7 +53,8 @@ pub async fn handle_conn(
             }
         };
 
-        // Discard invalid messages (less than 8 bytes is not possible with our message structure).
+        // Discard invalid messages (less than 8 bytes is not possible with our message
+        // structure).
         if datagram.len() < 8 {
             continue;
         }
@@ -69,8 +66,8 @@ pub async fn handle_conn(
         }
 
         // Extract the nonce value.
-        let (nonce_bytes, _) = datagram.split_at(8);
-        let nonce_value = u64::from_be_bytes(nonce_bytes.try_into().unwrap());
+        // let (nonce_bytes, _) = datagram.split_at(8);
+        // let nonce_value = u64::from_be_bytes(nonce_bytes.try_into().unwrap());
 
         // Decrypt the incoming message.
         let plaintext = match crypto.decrypt_datagram(&datagram) {

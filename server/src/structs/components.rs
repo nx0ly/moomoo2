@@ -99,13 +99,7 @@ pub struct ObjectBundle(
     pub NonReactiveCollider,
 );
 
-pub fn spawn_wall(
-    commands: &mut bevy_ecs::world::World,
-    x: f32,
-    y: f32,
-    half_width: f32,
-    half_height: f32,
-) -> Entity {
+pub fn spawn_wall(commands: &mut bevy_ecs::world::World, x: f32, y: f32, half_width: f32, half_height: f32) -> Entity {
     use crate::systems::{Collider, NonReactiveCollider};
 
     commands
@@ -119,12 +113,7 @@ pub fn spawn_wall(
         .id()
 }
 
-pub fn spawn_animal(
-    commands: &mut bevy_ecs::world::World,
-    animal_type: AnimalType,
-    x: f32,
-    y: f32,
-) -> Entity {
+pub fn spawn_animal(commands: &mut bevy_ecs::world::World, animal_type: AnimalType, x: f32, y: f32) -> Entity {
     use crate::systems::{Collider, ReactiveCollider};
 
     let (health, radius) = match animal_type {
@@ -152,10 +141,10 @@ pub fn spawn_animal(
 pub struct HitEvents(pub Vec<HitEvent>);
 
 pub struct HitEvent {
-    pub attacker: Entity,
+    pub attacker:     Entity,
     pub attacker_pos: Position,
-    pub affected: Vec<Entity>,
-    pub object_hits: Vec<(Entity, f32)>,
+    pub affected:     Vec<Entity>,
+    pub object_hits:  Vec<(Entity, f32)>,
 }
 
 #[derive(bevy_ecs::prelude::Resource, Default)]

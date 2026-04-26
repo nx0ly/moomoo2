@@ -1,0 +1,4 @@
+https://crates.io/crates/bumpalo
+^^ use this for game-related things (like buildings/animals)?
+
+- use a global quadtree, and rebuild a single one, rather than 2

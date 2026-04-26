@@ -1,25 +1,3 @@
-use crate::{
-    broadcast,
-    errors::InternalGameMessages,
-    net::SessionCrypto,
-    structs::components::{
-        AimDir, AnimalType, AttackState, Health, HitEvents, MoveDir, Name, ObjectEntity,
-        PlayerBundle, PlayerEntity, PlayerPositions, Position, ReloadState, Resources, Velocity,
-    },
-    systems::NonReactiveCollider,
-};
-use bevy_ecs::prelude::*;
-use bytes::Bytes;
-use chacha20poly1305::aead::Aead;
-use dashmap::DashMap;
-use parking_lot::Mutex;
-use shared::{
-    to_client::{
-        AddAnimalData, AnimalTO, HitEventTO, ObjectHitAnimData, ObjectTO, PlayerTO,
-        SetResourceData, SetWeaponsData, UpdatePlayerData,
-    },
-    to_server::ClientMessages,
-};
 use std::{
     collections::HashMap,
     sync::{
@@ -28,17 +6,44 @@ use std::{
     },
     time::Duration,
 };
+
+use bevy_ecs::prelude::*;
+use bytes::Bytes;
+use chacha20poly1305::aead::Aead;
+use dashmap::DashMap;
+use parking_lot::Mutex;
+use shared::{
+    to_client::{
+        AddAnimalData, AnimalTO, HitEventTO, ObjectHitAnimData, ObjectTO, PlayerTO, SetResourceData, SetWeaponsData,
+        UpdatePlayerData,
+    },
+    to_server::ClientMessages,
+};
 use wtransport::Connection;
 
+use crate::{
+    broadcast,
+    errors::InternalGameMessages,
+    net::SessionCrypto,
+    structs::components::{
+        AimDir, AnimalType, AttackState, Health, HitEvents, MoveDir, Name, ObjectEntity, PlayerBundle, PlayerEntity,
+        PlayerPositions, Position, ReloadState, Resources, Velocity,
+    },
+    systems::NonReactiveCollider,
+};
+
 #[derive(Clone)]
+/// Struct that represents a player connection.
 pub struct PlayerConnection {
     pub connection: Connection,
-    pub crypto: SessionCrypto,
+    pub crypto:     SessionCrypto,
     pub bytes_sent: Arc<AtomicU64>,
     pub bytes_recv: Arc<AtomicU64>,
 }
 
 impl PlayerConnection {
+    /// Initialize a new player connection. Takes a wtransport Connection and
+    /// the SessionCrypto.
     pub fn new(connection: Connection, crypto: SessionCrypto) -> Self {
         Self {
             connection,
@@ -63,15 +68,16 @@ impl PlayerConnection {
     //     Ok(())
     // }
     //
-    pub async fn send_encrypted(
-        &self,
-        plaintext: &[u8],
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+
+    /// Sends the encoded data (using borsh) through the Socket using datagrams.
+    pub async fn send_encrypted(&self, plaintext: &[u8]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Update the nonce counter.
         let mut counter = self.crypto.send_nonce.lock();
         let nonce_value = *counter;
         *counter = counter.wrapping_add(1);
         drop(counter);
 
+        // Create the nonce.
         let nonce = SessionCrypto::make_nonce(nonce_value);
 
         let ciphertext = self
@@ -83,6 +89,7 @@ impl PlayerConnection {
         let mut packet = nonce_value.to_be_bytes().to_vec();
         packet.extend(ciphertext);
 
+        // Update the bytes sent counter.
         self.bytes_sent
             .fetch_add(packet.len() as u64, std::sync::atomic::Ordering::Relaxed);
 
@@ -93,10 +100,9 @@ impl PlayerConnection {
         Ok(())
     }
 
-    pub async fn send_reliable(
-        &self,
-        plaintext: &[u8],
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    /// Sends the encoded data (using borsh) through the Socket using the TCP
+    /// protocol.
+    pub async fn send_reliable(&self, plaintext: &[u8]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let packet = {
             let mut counter = self.crypto.send_nonce.lock();
             let nonce_value = *counter;
@@ -129,32 +135,34 @@ impl PlayerConnection {
     }
 }
 
+/// World struct.
+/// Contains the bevy ECS world, the config, and the schedule.
 pub struct World {
     pub bevy_world: bevy_ecs::world::World,
-    pub config: crate::config::config::Config,
-    pub schedule: bevy_ecs::schedule::Schedule,
+    pub config:     crate::config::config::Config,
+    pub schedule:   bevy_ecs::schedule::Schedule,
 }
-pub type MWorld = Arc<Mutex<World>>;
 
 pub type IDToConnection = Arc<DashMap<u8, PlayerConnection>>;
 
 impl World {
+    /// Broadcasts the data to all the active connections.
     pub async fn broadcast(plaintext: &[u8], connections: &IDToConnection) {
+        // Get the values (the 'PlayerConnection') from the IDToConnection DashMap.
         let conns: Vec<PlayerConnection> = connections.iter().map(|e| e.value().clone()).collect();
 
+        // Loop through each connection and attempt to send.
         for conn in conns {
             let data = Bytes::copy_from_slice(plaintext);
             tokio::spawn(async move {
+                // Currently discards any errors. Might change later.
                 let _ = conn.send_encrypted(&data).await;
             });
         }
     }
 
-    pub async fn broadcast_with_exceptions(
-        exceptions: &[u8],
-        plaintext: &[u8],
-        connections: &IDToConnection,
-    ) {
+    /// Broadcasts the data to all active connections, except those exempt.
+    pub async fn broadcast_with_exceptions(exceptions: &[u8], plaintext: &[u8], connections: &IDToConnection) {
         let conns: Vec<PlayerConnection> = connections
             .iter()
             .filter(|e| !exceptions.contains(e.key()))
@@ -169,6 +177,8 @@ impl World {
         }
     }
 
+    /// Uses TCP to "guarantee" the message goes through.
+    /// Broadcasts the data to all active connections.
     pub async fn broadcast_reliable(plaintext: &[u8], connections: &IDToConnection) {
         let conns: Vec<PlayerConnection> = connections.iter().map(|e| e.value().clone()).collect();
 
@@ -180,6 +190,7 @@ impl World {
         }
     }
 
+    /// Sends the data through TCP to the connection mapped with the id.
     pub async fn send_reliable_to(id: u8, plaintext: &[u8], connections: &IDToConnection) {
         if let Some(conn) = connections.get(&id).map(|e| e.value().clone()) {
             let data = plaintext.to_vec();
@@ -200,6 +211,7 @@ impl World {
         }
     }
 
+    // TODO: Use somewhere...
     pub fn broadcast_nearby(
         plaintext: &[u8],
         connections: &IDToConnection,
@@ -230,6 +242,7 @@ impl World {
         }
     }
 
+    /// Process internal events.
     fn handle_internal_game_msgs(
         &mut self,
         msg: InternalGameMessages,
@@ -238,45 +251,50 @@ impl World {
         player_connections: &IDToConnection,
         rt_handle: &tokio::runtime::Handle,
     ) {
+        // Store a mutable reference to the bevy world.
         let bevy = &mut self.bevy_world;
+
+        // Process the message.
         match msg {
             InternalGameMessages::AddPlayer(p) => {
+                // Insert a new "PlayerInput".
                 input_map.insert(id, PlayerInput::new());
 
-                // tell the new player about all existing players
-                let entities: Vec<(u8, Entity)> = {
-                    let player_map = bevy.resource::<PlayerMap>();
-                    player_map.map.iter().map(|e| (*e.0, *e.1)).collect()
-                };
+                // Tell the new player about all existing players.
+                {
+                    let entities: Vec<(u8, Entity)> = {
+                        let player_map = bevy.resource::<PlayerMap>();
+                        player_map.map.iter().map(|e| (*e.0, *e.1)).collect()
+                    };
 
-                let player_connections_1 = player_connections.clone();
+                    for (existing_id, entity) in entities {
+                        if let (Some(name), Some(pos), Some(aim)) = (
+                            bevy.get::<Name>(entity),
+                            bevy.get::<Position>(entity),
+                            bevy.get::<AimDir>(entity),
+                        ) {
+                            let msg = crate::net::serialization::encode(
+                                1,
+                                ClientMessages::AddPlayer(shared::to_client::AddPlayerData {
+                                    is_mine: false,
+                                    data:    PlayerTO {
+                                        id:           existing_id,
+                                        name:         name.0.clone(),
+                                        x:            pos.0,
+                                        y:            pos.1,
+                                        aim:          aim.0,
+                                        weapon_index: Some(0),
+                                    },
+                                }),
+                            )
+                            .unwrap();
 
-                for (existing_id, entity) in entities {
-                    if let (Some(name), Some(pos), Some(aim)) = (
-                        bevy.get::<Name>(entity),
-                        bevy.get::<Position>(entity),
-                        bevy.get::<AimDir>(entity),
-                    ) {
-                        let msg = crate::net::serialization::encode(
-                            1,
-                            ClientMessages::AddPlayer(shared::to_client::AddPlayerData {
-                                is_mine: false,
-                                data: PlayerTO {
-                                    id: existing_id,
-                                    name: name.0.clone(),
-                                    x: pos.0,
-                                    y: pos.1,
-                                    aim: aim.0,
-                                    weapon_index: Some(0),
-                                },
-                            }),
-                        )
-                        .unwrap();
-
-                        broadcast!(to, rt_handle, player_connections, id, msg);
+                            broadcast!(to, rt_handle, player_connections, id, msg);
+                        }
                     }
                 }
 
+                // Tell the new player about all existing game objects.
                 {
                     let mut objects = Vec::new();
                     for entity in bevy
@@ -293,9 +311,9 @@ impl World {
                         .iter(&bevy)
                     {
                         let a = ObjectTO {
-                            id: entity.0.index(),
-                            x: entity.2 .0,
-                            y: entity.2 .1,
+                            id:    entity.0.index(),
+                            x:     entity.2 .0,
+                            y:     entity.2 .1,
                             scale: entity.6.rad,
                         };
 
@@ -311,7 +329,7 @@ impl World {
                     broadcast!(reliable_to, rt_handle, player_connections, id, msg);
                 }
 
-                // spawn the new player entity
+                // Spawn the new player entity.
                 use crate::systems::{Collider, ReactiveCollider};
                 let entity = bevy
                     .spawn(PlayerBundle(
@@ -330,14 +348,16 @@ impl World {
                         ReactiveCollider,
                     ))
                     .id();
+
+                // Insert it into our player map.
                 bevy.resource_mut::<PlayerMap>().map.insert(id, entity);
 
-                // tell the new player about themselves
+                // Tell the player about themself.
                 let spawn_self = crate::net::serialization::encode(
                     1,
                     ClientMessages::AddPlayer(shared::to_client::AddPlayerData {
                         is_mine: true,
-                        data: PlayerTO {
+                        data:    PlayerTO {
                             id,
                             name: p.name.clone(),
                             x: p.x,
@@ -349,25 +369,18 @@ impl World {
                 )
                 .unwrap();
 
-                let set_weapons =
-                    crate::net::serialization::encode(9, SetWeaponsData { weapons: vec![0] })
-                        .unwrap();
+                // Tell the player about their weapons.
+                let set_weapons = crate::net::serialization::encode(9, SetWeaponsData { weapons: vec![0] }).unwrap();
 
-                broadcast!(reliable_to, rt_handle, player_connections_1, id, spawn_self);
-                broadcast!(
-                    reliable_to,
-                    rt_handle,
-                    player_connections_1,
-                    id,
-                    set_weapons
-                );
+                broadcast!(reliable_to, rt_handle, player_connections, id, spawn_self);
+                broadcast!(reliable_to, rt_handle, player_connections, id, set_weapons);
 
-                // tell all existing players about the new player
+                // Tell all existing players about the new player.
                 let spawn_other = crate::net::serialization::encode(
                     1,
                     ClientMessages::AddPlayer(shared::to_client::AddPlayerData {
                         is_mine: false,
-                        data: PlayerTO {
+                        data:    PlayerTO {
                             id,
                             name: p.name.clone(),
                             x: p.x,
@@ -381,9 +394,14 @@ impl World {
 
                 broadcast!(except, rt_handle, player_connections, [id], spawn_other);
             }
+
             InternalGameMessages::Disconnect => {
+                // Remove their entry.
                 input_map.remove(&id);
 
+                // Despawn their bevy linked entity.
+                // TODO: Send a despawn packet to all players, telling them to remove the
+                // player.
                 if let Some(e) = bevy.resource_mut::<PlayerMap>().map.remove(&id) {
                     if let Some(p) = bevy.get::<Name>(e) {
                         tracing::info!("player {} ({}) gone", p.0, id);
@@ -391,6 +409,7 @@ impl World {
                     bevy.despawn(e);
                 }
             }
+
             InternalGameMessages::PlayerHit(_) => {
                 if let Some(&e) = bevy.resource::<PlayerMap>().map.get(&id) {
                     if let Some(mut hit) = bevy.get_mut::<AttackState>(e) {
@@ -398,26 +417,27 @@ impl World {
                     }
                 }
             }
+
             _ => {}
         }
     }
 
-    fn broadcast_state(
-        &mut self,
-        rt_handle: &tokio::runtime::Handle,
-        player_connections: &IDToConnection,
-    ) {
+    /// Broadcast the game state.
+    // TODO: finish commenting this monstrosity.
+    fn broadcast_state(&mut self, rt_handle: &tokio::runtime::Handle, player_connections: &IDToConnection) {
+        // Store a mutable reference to the bevy world.
         let bevy = &mut self.bevy_world;
 
+        // Collect all position updates.
+        // TODO: add a "has_moved" field or such, prevent caching people who haven't
+        // moved.
         let pos_updates: Vec<(u8, (f32, f32))> = {
             let player_map = bevy.resource::<PlayerMap>();
+
             player_map
                 .map
                 .iter()
-                .filter_map(|(id, &entity)| {
-                    bevy.get::<Position>(entity)
-                        .map(|pos| (*id, (pos.0, pos.1)))
-                })
+                .filter_map(|(id, &entity)| bevy.get::<Position>(entity).map(|pos| (*id, (pos.0, pos.1))))
                 .collect()
         };
 
@@ -427,7 +447,7 @@ impl World {
             pos_cache.0.insert(id, pos);
         }
 
-        // here
+        // Get the PlayerPositions.
         let positions = bevy.resource::<PlayerPositions>().0.clone();
         let hits = std::mem::take(&mut bevy.resource_mut::<HitEvents>().0);
 
@@ -441,43 +461,21 @@ impl World {
                 let origin = (hit.attacker_pos.0, hit.attacker_pos.1);
 
                 if let Some(&player_id) = entity_to_id.get(&hit.attacker) {
-                    let msg = crate::net::serialization::encode(
-                        6,
-                        HitEventTO {
-                            entity_id: player_id,
-                        },
-                    )
-                    .unwrap();
+                    let msg = crate::net::serialization::encode(6, HitEventTO { entity_id: player_id }).unwrap();
 
-                    broadcast!(
-                        nearby,
-                        rt_handle,
-                        player_connections,
-                        positions,
-                        origin,
-                        2048.0,
-                        msg
-                    );
+                    broadcast!(nearby, rt_handle, player_connections, positions, origin, 2048.0, msg);
                 }
 
                 for (obj_entity, angle) in hit.object_hits {
                     let msg = crate::net::serialization::encode(
                         10,
                         ObjectHitAnimData {
-                            id: obj_entity.index(),
+                            id:  obj_entity.index(),
                             dir: angle,
                         },
                     )
                     .unwrap();
-                    broadcast!(
-                        nearby,
-                        rt_handle,
-                        player_connections,
-                        positions,
-                        origin,
-                        2048.0,
-                        msg
-                    );
+                    broadcast!(nearby, rt_handle, player_connections, positions, origin, 2048.0, msg);
                 }
 
                 if let Some(&player_id) = entity_to_id.get(&hit.attacker) {
@@ -486,9 +484,9 @@ impl World {
                             let msg = crate::net::serialization::encode(
                                 11,
                                 SetResourceData {
-                                    wood: res.0,
+                                    wood:  res.0,
                                     stone: res.1,
-                                    food: res.2,
+                                    food:  res.2,
                                 },
                             )
                             .unwrap();
@@ -509,11 +507,11 @@ impl World {
                 bevy.get::<AimDir>(entity),
             ) {
                 updates.push(PlayerTO {
-                    id: *i,
-                    name: name.0.clone(),
-                    x: pos.0,
-                    y: pos.1,
-                    aim: aim.0,
+                    id:           *i,
+                    name:         name.0.clone(),
+                    x:            pos.0,
+                    y:            pos.1,
+                    aim:          aim.0,
                     weapon_index: Some(0),
                 });
             }
@@ -524,17 +522,15 @@ impl World {
         let iterator = animal_query.iter(&self.bevy_world);
         for (entity, pos, _type) in iterator {
             animal_updates.push(AnimalTO {
-                id: entity.index(),
-                x: pos.0,
-                y: pos.1,
+                id:          entity.index(),
+                x:           pos.0,
+                y:           pos.1,
                 animal_type: *_type as u8,
             })
         }
 
         if !updates.is_empty() {
-            let update_msg =
-                crate::net::serialization::encode(3, UpdatePlayerData { players: updates })
-                    .unwrap();
+            let update_msg = crate::net::serialization::encode(3, UpdatePlayerData { players: updates }).unwrap();
 
             broadcast!(rt_handle, player_connections, update_msg);
         }
@@ -548,7 +544,8 @@ impl World {
             )
             .unwrap();
 
-            broadcast!(reliable, rt_handle, player_connections, update_msg);
+            broadcast!(rt_handle, player_connections, update_msg);
+            // broadcast!(reliable, rt_handle, player_connections, update_msg);
         }
     }
 
@@ -566,22 +563,16 @@ impl World {
             {
                 let mut w = world.lock();
                 while let Ok((id, msg)) = input_rx.try_recv() {
-                    w.handle_internal_game_msgs(
-                        msg,
-                        &input_map,
-                        id,
-                        &player_connections,
-                        &rt_handle,
-                    );
+                    w.handle_internal_game_msgs(msg, &input_map, id, &player_connections, &rt_handle);
                 }
 
                 {
                     // let bevy = &mut w.bevy_world;
-                    let World { 
-        ref mut bevy_world, 
-        ref mut schedule, 
-        .. 
-    } = *w;
+                    let World {
+                        ref mut bevy_world,
+                        ref mut schedule,
+                        ..
+                    } = *w;
 
                     for entry in input_map.iter() {
                         let id = *entry.key();
@@ -615,15 +606,13 @@ pub struct PlayerMap {
 
 impl Default for PlayerMap {
     fn default() -> Self {
-        Self {
-            map: HashMap::new(),
-        }
+        Self { map: HashMap::new() }
     }
 }
 
 pub struct PlayerInput {
     pub move_dir: AtomicU32,
-    pub aim_dir: AtomicU32,
+    pub aim_dir:  AtomicU32,
 
     pub has_move: AtomicBool,
 }
@@ -634,13 +623,12 @@ impl PlayerInput {
         Self {
             has_move: AtomicBool::new(false),
             move_dir: AtomicU32::new(0),
-            aim_dir: AtomicU32::new(0),
+            aim_dir:  AtomicU32::new(0),
         }
     }
     pub fn set_move(&self, dir: Option<f32>) {
         self.has_move.store(dir.is_some(), Ordering::Relaxed);
-        self.move_dir
-            .store(dir.unwrap_or(0.0).to_bits(), Ordering::Relaxed);
+        self.move_dir.store(dir.unwrap_or(0.0).to_bits(), Ordering::Relaxed);
     }
     pub fn set_aim(&self, dir: f32) {
         self.aim_dir.store(dir.to_bits(), Ordering::Relaxed);

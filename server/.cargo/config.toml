@@ -1,2 +1,6 @@
 [target.'cfg(target_os = "linux")']
-rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+#gang mold shouldnt help runtime performance
+# rustflags = [
+#   "-C", "target-cpu=native",
+#   "-C", "llvm-args=-unroll-loops",
+# ]

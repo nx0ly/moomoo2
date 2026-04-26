@@ -1,7 +1,7 @@
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Point {
-    pub x: f32,
-    pub y: f32,
+    pub x:     f32,
+    pub y:     f32,
     pub index: usize,
 }
 
@@ -26,23 +26,19 @@ impl Rect {
 
     #[inline(always)]
     pub fn contains(&self, p: &Point) -> bool {
-        // inshallah this gets optimized by compiler
         p.x >= self.x_min && p.x <= self.x_max && p.y >= self.y_min && p.y <= self.y_max
     }
 
     #[inline(always)]
     pub fn intersects(&self, other: &Rect) -> bool {
-        !(other.x_min > self.x_max
-            || other.x_max < self.x_min
-            || other.y_min > self.y_max
-            || other.y_max < self.y_min)
+        !(other.x_min > self.x_max || other.x_max < self.x_min || other.y_min > self.y_max || other.y_max < self.y_min)
     }
 }
 
 pub struct Quadtree {
     boundary: Rect,
     capacity: usize,
-    points: Vec<Point>,
+    points:   Vec<Point>,
     children: Option<Box<[Quadtree; 4]>>,
 }
 
@@ -71,10 +67,7 @@ impl Quadtree {
 
         let children = unsafe { self.children.as_mut().unwrap_unchecked() };
 
-        children[0].insert(point)
-            || children[1].insert(point)
-            || children[2].insert(point)
-            || children[3].insert(point)
+        children[0].insert(point) || children[1].insert(point) || children[2].insert(point) || children[3].insert(point)
     }
 
     fn subdivide(&mut self) {
