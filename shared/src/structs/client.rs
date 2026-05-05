@@ -14,7 +14,7 @@ use crate::structs::server::{Aim, GameObject, HitEvent, Move, Player, SetWeapons
 #[derive(BorshSerialize, Deserialize, Serialize, BorshDeserialize)]
 pub struct JsPlayer {
     name: String,
-    id: u8,
+    id: u32,
     x: f32,
     y: f32,
     move_dir: Option<f32>,
@@ -28,7 +28,7 @@ impl JsPlayer {
         self.name.clone()
     }
 
-    pub fn get_id(&self) -> u8 {
+    pub fn get_id(&self) -> u32 {
         self.id
     }
 

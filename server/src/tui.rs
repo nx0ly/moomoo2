@@ -35,7 +35,7 @@ use crate::{
 
 #[derive(Clone)]
 struct PlayerSnap {
-    id:         u8,
+    id:         u32,
     name:       String,
     x:          f32,
     y:          f32,
@@ -115,7 +115,7 @@ impl App {
         }
     }
 
-    fn selected_id(&self) -> Option<u8> {
+    fn selected_id(&self) -> Option<u32> {
         let tbl = if self.tab == 2 { &self.net_tbl } else { &self.player_tbl };
         tbl.selected().and_then(|i| self.players.get(i)).map(|p| p.id)
     }
@@ -224,7 +224,7 @@ pub fn init_tui(world: Arc<Mutex<GameWorld>>, connections: IDToConnection, game_
 fn refresh(world: &Arc<Mutex<GameWorld>>, connections: &IDToConnection, app: &mut App) {
     let mut w = world.lock();
 
-    let ids: Vec<(u8, Entity)> = {
+    let ids: Vec<(u32, Entity)> = {
         let pm = w.bevy_world.resource::<PlayerMap>();
         pm.map.iter().map(|(k, v)| (*k, *v)).collect()
     };

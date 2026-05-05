@@ -14,9 +14,9 @@ export default class Player {
     this.aim = aim;
     this.lastAim = aim;
     this.visualAim = aim;
-    this.attackAnim = 1;
+    this.attackAnim = 0;
     this.visualAim = this.aim ?? 0;
-    this.animateRightArm = true;
+    this.animateRightArm = false;
     this.lastX = x;
     this.lastY = y;
     this.lerpX = x;
@@ -67,25 +67,42 @@ export default class Player {
     world.addChild(label);
   }
 
-
   initSprites([playerTexture, arm1Texture, arm2Texture]) {
-    this.sprite = new Sprite(playerTexture);
-    this.sprite.arm1Sprite = new Sprite(arm1Texture);
-    this.sprite.arm2Sprite = new Sprite(arm2Texture);
+    const container = new Container();
 
-    this.sprite.arm1Sprite.anchor.set(0.5);
-    this.sprite.arm1Sprite.width = 50;
-    this.sprite.arm1Sprite.height = 60;
+    const shadow = new Graphics();
+    shadow.circle(0, 0, 40).fill(0x000000);
+    shadow.alpha = 0.05;
 
-    this.sprite.arm2Sprite.anchor.set(0.5);
-    this.sprite.arm2Sprite.width = 50;
-    this.sprite.arm2Sprite.height = 60;
+    shadow.scale.set(0.9, 1);
 
-    this.sprite._rx = this.x;
-    this.sprite._ry = this.y;
+    const playerSprite = new Sprite(playerTexture);
+    playerSprite.anchor.set(0.5);
+    playerSprite.width = playerSprite.height = 70;
 
-    this.sprite.anchor.set(0.5);
-    this.sprite.width = this.sprite.height = 70;
+    const arm1 = new Sprite(arm1Texture);
+    const arm2 = new Sprite(arm2Texture);
+
+    arm1.anchor.set(0.5);
+    arm1.width = 50;
+    arm1.height = 60;
+
+    arm2.anchor.set(0.5);
+    arm2.width = 50;
+    arm2.height = 60;
+
+    container.addChild(shadow);
+    container.addChild(playerSprite);
+
+    container.playerSprite = playerSprite;
+    container.shadow = shadow;
+    container.arm1Sprite = arm1;
+    container.arm2Sprite = arm2;
+
+    container._rx = this.x;
+    container._ry = this.y;
+
+    this.sprite = container;
   }
 
   update(delta, rotation, lerpAlpha) {

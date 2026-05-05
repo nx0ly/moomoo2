@@ -12,7 +12,7 @@ use crate::structs::server::Player as ServerPlayer;
 #[cfg_attr(feature = "server", derive(Component))]
 #[cfg_attr(feature = "web", derive(Serialize, Deserialize))]
 pub struct PlayerTO {
-    pub id: u8,
+    pub id: u32,
     pub name: String,
     pub x: f32,
     pub y: f32,
@@ -58,7 +58,7 @@ pub struct AnimalTO {
 #[cfg_attr(feature = "server", derive(Component))]
 #[cfg_attr(feature = "web", derive(Serialize, Deserialize))]
 pub struct HitEventTO {
-    pub entity_id: u8,
+    pub entity_id: u32,
 }
 
 #[derive(Debug, Clone, BorshDeserialize, BorshSerialize)]
@@ -68,7 +68,9 @@ pub struct ObjectTO {
     pub id: u32,
     pub x: f32,
     pub y: f32,
+    pub dir: f32,
     pub scale: f32,
+    pub type_obj: u8,
 }
 
 #[derive(Debug, Clone, BorshDeserialize, BorshSerialize)]

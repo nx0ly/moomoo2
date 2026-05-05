@@ -5,8 +5,13 @@ import Player from "./objects/player";
 import { decodePacket, initDecoder } from "./packetHandler";
 import { ActionBar } from "./ui/actionBar";
 import { WEAPONS } from "./data/weapons";
-import { ResourceDisplay } from "./ui/resourceDisplay";
+// import { ResourceDisplay } from "./ui/resourceDisplay";
 import { HitLeaf } from "./objects/leaf";
+import GameObject from "./objects/object";
+
+import PlayerSprite from "./assets/head.png";
+import Arm1Sprite from "./assets/arm_1.png";
+import Arm2Sprite from "./assets/arm_2.png";
 
 export class Game {
   constructor() {
@@ -19,7 +24,7 @@ export class Game {
     this.leaves = [];
 
     this.actionBar = null;
-    this.resourcedisplay = new ResourceDisplay();
+    this.resourceDisplay = null; //new ResourceDisplay();
 
     this.my_player = null;
 
@@ -259,9 +264,9 @@ export class Game {
         const player = new Player(
           data,
           [
-            this.renderer.textures.player_texture,
-            this.renderer.textures.arm1_texture,
-            this.renderer.textures.arm2_texture,
+            this.renderer.textures[PlayerSprite],
+            this.renderer.textures[Arm1Sprite],
+            this.renderer.textures[Arm2Sprite],
           ],
           this.renderer.world,
         );
@@ -329,7 +334,7 @@ export class Game {
 
       case 7:
         console.log("objects:", packet);
-        this.objects = packet.data.objects;
+        this.objects = packet.data.objects.map(x => new GameObject(x));
         break;
 
       case 9:
@@ -341,14 +346,16 @@ export class Game {
 
         case 10: {
           const object = this.utils.findObjectByID(packet.data.id);
+          object.onHit(packet.data.dir);
           this.renderer.leaves.push(new HitLeaf(object.x + (object.scale * Math.cos(packet.data.dir)), object.y + (object.scale * Math.sin(packet.data.dir)), packet.data.dir, this.renderer.leafTexture, this.renderer.world));
         }
 
       case 11: {
         const { wood, stone, food } = packet.data;
-        window.resourceDisplay?.updateResource("wood", wood);
-        window.resourceDisplay?.updateResource("stone", stone);
-        window.resourceDisplay?.updateResource("food", food);
+        if (wood)
+          this.resourceDisplay.updateResource("wood", wood);
+        // this.resourceDisplay.updateResource("stone", stone);
+        // this.resourceDisplay.updateResource("food", food);
         break;
       }
 

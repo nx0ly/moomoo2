@@ -5,14 +5,15 @@ use bevy_ecs::{
     query::With,
     system::{Query, ResMut},
 };
+use ratatui::layout::Positions;
 use shared::objects::{GameObjects, StaticGameObjects};
 
 use crate::{
     structs::{
         components::{
-            AimDir, AttackState, Health, HitEvent, HitEvents, ObjectEntity, PlayerEntity, Position, ReloadState, Resources
+            AimDir, AttackState, HitEvent, HitEvents, ObjectEntity, PlayerEntity, Position, ReloadState, Resources,
         },
-        weapons::{Weapon, get_weapon_damage, get_weapon_range},
+        weapons::{get_weapon_range, Weapon},
     },
     systems::Collider,
 };
@@ -34,7 +35,7 @@ pub fn attack_system(
         With<PlayerEntity>,
     >,
     object_targets: Query<(Entity, &Position, &Collider, &GameObjects), With<ObjectEntity>>,
-    mut player_targets: Query<(Entity, &Position, &Collider, &mut Health), With<PlayerEntity>>,
+    player_targets: Query<(Entity, &Position, &Collider), With<PlayerEntity>>,
     mut hit_events: ResMut<HitEvents>,
 ) {
     // Clear past hit events.
@@ -56,30 +57,31 @@ pub fn attack_system(
         else if attack_state.0 {
             // Store objects hit by the attacker.
             let mut object_hits = Vec::new();
-            // Store players hit by the attacker.
+            // // Store players hit by the attacker.
             // let mut players_hits = Vec::new();
 
-            // Loop through all players, collecting their id, position, and collider.
-            for (target_id, target_pos, target_collider, mut target_health) in player_targets.iter_mut() {
-                // Get the distance between the attacker and the target.
-                let dist = get_distance(pos, target_pos);
+            // // Loop through all players, collecting their id, position, and collider.
+            // for (target_id, target_pos, target_collider) in player_targets.iter() {
+            //     // Get the distance between the attacker and the target.
+            //     let dist = get_distance(pos, target_pos);
 
-                // If the distance between the attacker and the target is less than the
-                // scales + the attacker's weapon range, we can proceed.
-                if dist < collider.rad + target_collider.rad + get_weapon_range(weapon) {
-                    // TODO: fix angle logic.
-                    // Get the angle, in radians, of the attacker's position and the game object's
-                    // position.
-                    let angle = (pos.1 - target_pos.1).atan2(pos.0 - target_pos.0);
+            //     // If the distance between the attacker and the target is less than the
+            //     // scales + the attacker's weapon range, we can proceed.
+            //     if dist < collider.rad + target_collider.rad + get_weapon_range(weapon) {
+            //         // TODO: fix angle logic.
+            //         // Get the angle, in radians, of the attacker's position and the game object's
+            //         // position.
+            //         let angle = (pos.1 - target_pos.1).atan2(pos.0 - target_pos.0);
 
-                    // If the angle difference is greather than PI.
-                    if angle_diff(aim.0, angle).abs() > f32::consts::PI / 2.0 {
-                        // This satisfies all criteria, add it to the Vec.
-                        // players_hits.push((target_id, angle));
-                        target_health.0 = target_health.0.clamp(0., target_health.0 - get_weapon_damage(weapon));
-                    }
-                }
-            }
+            //         // If the angle difference is greather than PI.
+            //         if angle_diff(aim.0, angle).abs() > f32::consts::PI / 2.0 {
+            //             // This satisfies all criteria, add it to the Vec.
+            //             players_hits.push((target_id, angle));
+
+                        
+            //         }
+            //     }
+            // }
 
             // Loop through all game objects, collecting their id, position, collider, and
             // their type.

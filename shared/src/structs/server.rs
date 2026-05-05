@@ -14,7 +14,7 @@ use crate::structs::client::{JsGameObject, JsPlayer};
 #[cfg_attr(feature = "web", derive(Serialize, Deserialize))]
 pub struct Player {
     pub name: String,
-    pub id: u8,
+    pub id: u32,
     pub x: f32,
     pub y: f32,
     pub move_dir: Option<f32>,
@@ -26,7 +26,7 @@ pub struct Player {
 }
 
 impl Player {
-    pub fn new(name: String, id: u8) -> Self {
+    pub fn new(name: String, id: u32) -> Self {
         Self {
             name,
             id,

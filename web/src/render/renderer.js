@@ -4,15 +4,16 @@ import {
   Container,
   Graphics,
   Sprite,
-  Text,
-  TextStyle,
 } from "pixi.js";
 import Camera from "../objects/camera";
-import PlayerSVG from "../assets/head.png";
-import FishPNG from "../assets/fish_1.png";
-import Arm1 from "../assets/arm_1.png";
-import Arm2 from "../assets/arm_2.png";
-import Tree from "../assets/tree.png";
+
+// Sprites
+import PlayerSprite from "../assets/head.png";
+import FishSprite from "../assets/fish_1.png";
+import Arm1Sprite from "../assets/arm_1.png";
+import Arm2Sprite from "../assets/arm_2.png";
+import TreeSprite from "../assets/tree.png";
+import StoneSprite from "../assets/stone.png";
 import LeafParticle from "../assets/particle_0.png";
 
 export class Render {
@@ -37,17 +38,19 @@ export class Render {
     this.world.addChild(this.grid);
 
     this.leaves = [];
+    this.particles = [];
+
+    this.texturesToLoad = [
+      PlayerSprite, FishSprite, Arm1Sprite, Arm2Sprite, TreeSprite, StoneSprite, LeafParticle
+    ];
 
     this.player_id_to_sprite = {};
     this.animal_id_to_sprite = {};
     this.object_id_to_sprite = {};
-    this.arm_textures = [];
     this.textures = {};
     this.animals = [];
-    this.objectTextures = {};
-    this.leafTexture;
 
-    this.drawGrid(this.grid, 16384, 16384, 64);
+    // this.drawGrid(this.grid, 16384, 16384, 64);
   }
 
   drawGrid(ctx, width, height, size) {
@@ -64,32 +67,18 @@ export class Render {
   }
 
   async init() {
+    // Initialize Pixi.js Application.
     await this.app.init({
       view: document.getElementById("mainCanvas"),
       background: "#000",
       resizeTo: window,
       resolution: window.devicePixelRatio || 1,
-      antialias: false,
+      antialias: true,
     });
 
-    const playerAsset = await Assets.load(PlayerSVG);
-    const fishAsset = await Assets.load(FishPNG);
-    this.arm_textures.push(
-      ...[await Assets.load(Arm1), await Assets.load(Arm2)],
-    );
-    this.textures.arm1_texture = this.arm_textures[0];
-    this.textures.arm2_texture = this.arm_textures[1];
-
-    await Assets.load({
-      src: "/src/assets/game_font.ttf",
-      data: { family: "GameFont" },
+    this.texturesToLoad.forEach(async texture => {
+      this.textures[texture] = await Assets.load(texture);
     });
-    this.objectTextures.tree = await Assets.load(Tree);
-
-    this.leafTexture = await Assets.load(LeafParticle);
-
-    this.textures.player_texture = playerAsset;
-    this.textures.fish_texture = fishAsset;
 
     this.app.stage.addChild(this.world);
     this.app.stage.addChild(this.ui);
@@ -98,6 +87,7 @@ export class Render {
 
   // draw loop
   draw = (ticker) => {
+    // Return if my player is not in game.
     const myPlayer = this.game?.my_player;
     if (!myPlayer) return;
 
@@ -127,7 +117,7 @@ export class Render {
 
       // create new texture
       if (!sprite) {
-        sprite = new Sprite(this.textures.fish_texture);
+        sprite = new Sprite(this.textures[FishSprite]);
 
         sprite.anchor.set(0.5);
         sprite.width = sprite.height = 128;
@@ -161,17 +151,25 @@ export class Render {
 
       // create new texture
       if (!sprite) {
-        sprite = new Sprite(this.objectTextures.tree);
+        let texture;
+        switch (object.type_obj) {
+          case 0: texture = this.textures[TreeSprite]; break;
+          case 1: texture = this.textures[StoneSprite]; break;
+        }
+        sprite = new Sprite(texture);
 
         sprite.anchor.set(0.5);
         sprite.width = sprite.height = object.scale * 2.8;
+        sprite.rotation = object.dir;
 
         this.object_id_to_sprite[object.id] = sprite;
         this.world.addChild(sprite);
       }
 
-      sprite.x = object.x;
-      sprite.y = object.y;
+      sprite.x = object.x + object.wiggleX;
+      sprite.y = object.y + object.wiggleY;
+
+      object.updateWiggle(delta);
     }
 
     this.leaves.forEach(leaf => {

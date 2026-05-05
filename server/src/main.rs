@@ -1,4 +1,4 @@
-use std::sync::{atomic::AtomicU8, Arc};
+use std::sync::{atomic::AtomicU32, Arc};
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 struct CollisionSet;
@@ -35,8 +35,8 @@ use mimalloc::MiMalloc;
 static GLOBAL: MiMalloc = MiMalloc;
 
 // Types.
-pub type ConnectionMap = Arc<DashMap<u8, PlayerConnection>>;
-pub type GameChannel = tokio::sync::mpsc::Sender<(u8, InternalGameMessages)>;
+pub type ConnectionMap = Arc<DashMap<u32, PlayerConnection>>;
+pub type GameChannel = tokio::sync::mpsc::Sender<(u32, InternalGameMessages)>;
 
 // Global config.
 pub static CONFIG: once_cell::sync::Lazy<Config> =
@@ -95,7 +95,7 @@ async fn main() -> anyhow::Result<()> {
     let player_connections: IDToConnection = Arc::new(DashMap::new());
     let input_map: InputMap = Arc::new(DashMap::new());
 
-    let (input_tx, input_rx) = god::channel::<(u8, InternalGameMessages)>(1024);
+    let (input_tx, input_rx) = god::channel::<(u32, InternalGameMessages)>(1024);
 
     // Initialize WebTransport server.
     let identity = Identity::load_pemfiles("cert.pem", "key.pem").await?;
@@ -108,7 +108,7 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("server listening on port 6767");
 
     // Stores the next user id.
-    let next_id = AtomicU8::new(0);
+    let next_id = AtomicU32::new(0);
 
     // Spawn a tokio task to handle incoming connection requests.
     tokio::spawn({
@@ -161,16 +161,16 @@ async fn main() -> anyhow::Result<()> {
     });
 
     // Spawn the Terminal Interface on a dedicated system thread.
-    std::thread::spawn({
-        let tui_world = world.clone();
-        let tui_conns = player_connections.clone();
-        let tui_tx = input_tx.clone();
-        move || {
-            if let Err(e) = tui::init_tui(tui_world, tui_conns, tui_tx) {
-                tracing::error!("TUI error: {e}");
-            }
-        }
-    });
+    // std::thread::spawn({
+    //     let tui_world = world.clone();
+    //     let tui_conns = player_connections.clone();
+    //     let tui_tx = input_tx.clone();
+    //     move || {
+    //         if let Err(e) = tui::init_tui(tui_world, tui_conns, tui_tx) {
+    //             tracing::error!("TUI error: {e}");
+    //         }
+    //     }
+    // });
 
     // Return a pending future to keep the runtime alive.
     Ok(std::future::pending::<()>().await)

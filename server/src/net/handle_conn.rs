@@ -9,7 +9,7 @@ use crate::{
 /// Exported fn that handles wtransport connection requests.
 pub async fn handle_conn(
     connection: wtransport::Connection,
-    player_id: u8,
+    player_id: u32,
     connection_map: ConnectionMap,
     game_tx: GameChannel,
     input_map: InputMap,

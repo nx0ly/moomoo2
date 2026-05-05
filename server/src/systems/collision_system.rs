@@ -19,8 +19,9 @@ use crate::structs::quadtree::{Point, Quadtree, Rect};
 /// The collider struct that is contained in ECS bundles.
 #[derive(Component, Clone)]
 pub struct Collider {
-    pub shape: SharedShape,
-    pub rad:   f32,
+    pub shape:        SharedShape,
+    pub rad:          f32,
+    pub half_extents: (f32, f32),
 }
 
 impl Collider {
@@ -29,14 +30,16 @@ impl Collider {
         Self {
             shape: SharedShape::new(Ball::new(rad)),
             rad,
+            half_extents: (rad, rad),
         }
     }
 
     /// Initializes a 'Cuboid' type collider with the params.
     pub fn rect(half_w: f32, half_h: f32) -> Self {
         Self {
-            shape: SharedShape::new(Cuboid::new(Vector::new(half_w, half_h))),
-            rad:   (half_w * half_w + half_h * half_h).sqrt(),
+            shape:        SharedShape::new(Cuboid::new(Vector::new(half_w, half_h))),
+            rad:          half_w.max(half_h),
+            half_extents: (half_w, half_h),
         }
     }
 }
@@ -75,7 +78,7 @@ pub fn collision_resolution_system(
 
     // Prepare a quadtree.
     // TODO: Move the quadtree into a bevy ecs Resource and rebuild it instead.
-    let boundary = Rect::new(0., 0., 16384.0, 16384.0);
+    let boundary = Rect::new(8192.0, 8192.0, 8192.0, 8192.0);
     let mut qtree = Quadtree::new(boundary, 6);
 
     // Insert all reactive collider entities into the quadtree.
@@ -99,12 +102,7 @@ pub fn collision_resolution_system(
 
         // Declare a search radius and define a 'Rect' to query into the quadtree using.
         let search_radius = col_i_rad * 3.0;
-        let query_rect = Rect::new(
-            pos_i_x - search_radius,
-            pos_i_y - search_radius,
-            search_radius * 2.,
-            search_radius * 2.,
-        );
+        let query_rect = Rect::new(pos_i_x, pos_i_y, search_radius, search_radius);
 
         // Clear the scratch buffer.
         scratch_buffer.clear();
@@ -185,9 +183,11 @@ pub fn collision_resolution_system(
         for ((wx, wy), wall_col) in &walls {
             let dx = wx - pos.0;
             let dy = wy - pos.1;
-            let combined_rad = col.rad + wall_col.rad;
 
-            if dx * dx + dy * dy < combined_rad * combined_rad {
+            // AFTER — proper AABB overlap:
+            let combined_x = col.half_extents.0 + wall_col.half_extents.0;
+            let combined_y = col.half_extents.1 + wall_col.half_extents.1;
+            if dx.abs() < combined_x && dy.abs() < combined_y {
                 let iso_a = Isometry::translation(pos.0, pos.1);
                 let iso_b = Isometry::translation(*wx, *wy);
 

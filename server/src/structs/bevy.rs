@@ -13,11 +13,10 @@ use chacha20poly1305::aead::Aead;
 use dashmap::DashMap;
 use parking_lot::Mutex;
 use shared::{
-    to_client::{
+    objects::GameObjects, to_client::{
         AddAnimalData, AnimalTO, HitEventTO, ObjectHitAnimData, ObjectTO, PlayerTO, SetResourceData, SetWeaponsData,
         UpdatePlayerData,
-    },
-    to_server::ClientMessages,
+    }, to_server::ClientMessages
 };
 use wtransport::Connection;
 
@@ -143,7 +142,7 @@ pub struct World {
     pub schedule:   bevy_ecs::schedule::Schedule,
 }
 
-pub type IDToConnection = Arc<DashMap<u8, PlayerConnection>>;
+pub type IDToConnection = Arc<DashMap<u32, PlayerConnection>>;
 
 impl World {
     /// Broadcasts the data to all the active connections.
@@ -162,7 +161,7 @@ impl World {
     }
 
     /// Broadcasts the data to all active connections, except those exempt.
-    pub async fn broadcast_with_exceptions(exceptions: &[u8], plaintext: &[u8], connections: &IDToConnection) {
+    pub async fn broadcast_with_exceptions(exceptions: &[u32], plaintext: &[u8], connections: &IDToConnection) {
         let conns: Vec<PlayerConnection> = connections
             .iter()
             .filter(|e| !exceptions.contains(e.key()))
@@ -191,7 +190,7 @@ impl World {
     }
 
     /// Sends the data through TCP to the connection mapped with the id.
-    pub async fn send_reliable_to(id: u8, plaintext: &[u8], connections: &IDToConnection) {
+    pub async fn send_reliable_to(id: u32, plaintext: &[u8], connections: &IDToConnection) {
         if let Some(conn) = connections.get(&id).map(|e| e.value().clone()) {
             let data = plaintext.to_vec();
             tokio::spawn(async move {
@@ -202,7 +201,7 @@ impl World {
         }
     }
 
-    pub async fn send_to(id: u8, plaintext: &[u8], connections: &IDToConnection) {
+    pub async fn send_to(id: u32, plaintext: &[u8], connections: &IDToConnection) {
         if let Some(conn) = connections.get(&id).map(|e| e.value().clone()) {
             let data = Bytes::copy_from_slice(plaintext);
             tokio::spawn(async move {
@@ -215,12 +214,12 @@ impl World {
     pub fn broadcast_nearby(
         plaintext: &[u8],
         connections: &IDToConnection,
-        positions: &std::collections::HashMap<u8, (f32, f32)>,
+        positions: &std::collections::HashMap<u32, (f32, f32)>,
         origin: (f32, f32),
         radius: f32,
     ) {
         let radius_sq = radius * radius;
-        let conns: Vec<(u8, PlayerConnection)> = connections
+        let conns: Vec<(u32, PlayerConnection)> = connections
             .iter()
             .filter(|e| {
                 if let Some(&(px, py)) = positions.get(e.key()) {
@@ -247,7 +246,7 @@ impl World {
         &mut self,
         msg: InternalGameMessages,
         input_map: &InputMap,
-        id: u8,
+        id: u32,
         player_connections: &IDToConnection,
         rt_handle: &tokio::runtime::Handle,
     ) {
@@ -262,7 +261,7 @@ impl World {
 
                 // Tell the new player about all existing players.
                 {
-                    let entities: Vec<(u8, Entity)> = {
+                    let entities: Vec<(u32, Entity)> = {
                         let player_map = bevy.resource::<PlayerMap>();
                         player_map.map.iter().map(|e| (*e.0, *e.1)).collect()
                     };
@@ -301,6 +300,7 @@ impl World {
                         .query::<(
                             Entity,
                             &ObjectEntity,
+                            &GameObjects,
                             &Position,
                             &AimDir,
                             &Health,
@@ -310,14 +310,22 @@ impl World {
                         )>()
                         .iter(&bevy)
                     {
-                        let a = ObjectTO {
-                            id:    entity.0.index(),
-                            x:     entity.2 .0,
-                            y:     entity.2 .1,
-                            scale: entity.6.rad,
+                        let type_obj = match entity.2 {
+                            shared::objects::GameObjects::StaticGameObjects(shared::objects::StaticGameObjects::Tree) => 0,
+                            shared::objects::GameObjects::StaticGameObjects(shared::objects::StaticGameObjects::Stone) => 1,
+                            shared::objects::GameObjects::StaticGameObjects(shared::objects::StaticGameObjects::Bush) => 2,
+
+                            _ => 67,
                         };
 
-                        objects.push(a);
+                        objects.push(ObjectTO {
+                            id:    entity.0.index(),
+                            x:     entity.3 .0,
+                            y:     entity.3 .1,
+                            dir:   entity.4.0,
+                            scale: entity.7.rad,
+                            type_obj,
+                        });
                     }
 
                     let msg = crate::net::serialization::encode(
@@ -343,7 +351,7 @@ impl World {
                         ReloadState(0, 300),
                         Health(100., 100.),
                         AttackState(false),
-                        Resources(100, 100, 100, 100, 0),
+                        Resources(0, 0, 0, 0, 0),
                         Collider::circle(35.),
                         ReactiveCollider,
                     ))
@@ -431,7 +439,7 @@ impl World {
         // Collect all position updates.
         // TODO: add a "has_moved" field or such, prevent caching people who haven't
         // moved.
-        let pos_updates: Vec<(u8, (f32, f32))> = {
+        let pos_updates: Vec<(u32, (f32, f32))> = {
             let player_map = bevy.resource::<PlayerMap>();
 
             player_map
@@ -454,7 +462,7 @@ impl World {
         if !hits.is_empty() {
             // build reverse map: Entity -> player_id
             let player_map = bevy.resource::<PlayerMap>();
-            let entity_to_id: std::collections::HashMap<Entity, u8> =
+            let entity_to_id: std::collections::HashMap<Entity, u32> =
                 player_map.map.iter().map(|e| (*e.1, *e.0)).collect();
 
             for hit in hits {
@@ -544,14 +552,14 @@ impl World {
             )
             .unwrap();
 
-            broadcast!(rt_handle, player_connections, update_msg);
-            // broadcast!(reliable, rt_handle, player_connections, update_msg);
+            // broadcast!(rt_handle, player_connections, update_msg);
+            broadcast!(reliable, rt_handle, player_connections, update_msg);
         }
     }
 
     pub fn run(
         world: Arc<Mutex<World>>,
-        mut input_rx: tokio::sync::mpsc::Receiver<(u8, InternalGameMessages)>,
+        mut input_rx: tokio::sync::mpsc::Receiver<(u32, InternalGameMessages)>,
         input_map: InputMap,
         player_connections: IDToConnection,
         rt_handle: tokio::runtime::Handle,
@@ -601,7 +609,7 @@ impl World {
 
 #[derive(Debug, Resource)]
 pub struct PlayerMap {
-    pub map: HashMap<u8, Entity>,
+    pub map: HashMap<u32, Entity>,
 }
 
 impl Default for PlayerMap {
@@ -643,4 +651,4 @@ impl PlayerInput {
     }
 }
 
-pub type InputMap = Arc<DashMap<u8, PlayerInput>>;
+pub type InputMap = Arc<DashMap<u32, PlayerInput>>;

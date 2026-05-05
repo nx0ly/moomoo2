@@ -81,13 +81,8 @@ pub fn animal_ai_system(
                     let mut avg_vel_y = 0.0_f32;
                     let mut center_x = 0.0_f32;
                     let mut center_y = 0.0_f32;
-
-                    let search = Rect::new(
-                        pos.0 - VISUAL_RANGE,
-                        pos.1 - VISUAL_RANGE,
-                        VISUAL_RANGE * 2.0,
-                        VISUAL_RANGE * 2.0,
-                    );
+                    
+                    let search = Rect::new(pos.0, pos.1, VISUAL_RANGE, VISUAL_RANGE);
 
                     nearby.clear();
                     qtree.query(&search, &mut nearby);

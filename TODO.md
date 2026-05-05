@@ -15,13 +15,13 @@
 - [ ] Place Objects anywhere and push them out from center if you build inside of another (easier to connect buildings)
 - [ ] More Challenge Icons (Currently MooMoo only has the skull for most kills)
 - [ ] More Tribe features like: Trading and Assigning Roles
-- [ ] Physics Blocks and Improved Collisions
+- [-] Physics Blocks and Improved Collisions
 - [ ] TNT and other explosives
 - [ ] Improved Combat to prevent food spam scripts (essentially limit the amount of food to consume per tick)
 - [ ] Actual Anti bot scripts
 - [ ] Killable Nebula NPC
 - [ ] Texture Mod Support
-- [ ] Improved Animations (gonna interpret this as just proper lerping)
+- [-] Improved Animations (gonna interpret this as just proper lerping)
 - [ ] Account to track stats and buy skins
 
 # my todo list personal
